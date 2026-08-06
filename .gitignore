@@ -53,6 +53,7 @@ out/
 
 # Project specific
 output_dir/
+log.json
 *.txt
 
 # Logs
