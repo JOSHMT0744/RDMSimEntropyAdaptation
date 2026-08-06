@@ -1,0 +1,602 @@
+{
+  "88": {
+    "selected_topology": "mst",
+    "time_to_write": 1380.0,
+    "active_links": 92,
+    "badwidth_consumption": 2208.0
+  },
+  "89": {
+    "selected_topology": "mst",
+    "time_to_write": 1624.0,
+    "active_links": 116,
+    "badwidth_consumption": 3132.0
+  },
+  "90": {
+    "selected_topology": "mst",
+    "time_to_write": 2249.0,
+    "active_links": 173,
+    "badwidth_consumption": 3460.0
+  },
+  "91": {
+    "selected_topology": "rt",
+    "time_to_write": 2408.0,
+    "active_links": 172,
+    "badwidth_consumption": 3612.0
+  },
+  "92": {
+    "selected_topology": "mst",
+    "time_to_write": 702.0,
+    "active_links": 39,
+    "badwidth_consumption": 819.0
+  },
+  "93": {
+    "selected_topology": "mst",
+    "time_to_write": 416.0,
+    "active_links": 32,
+    "badwidth_consumption": 640.0
+  },
+  "94": {
+    "selected_topology": "mst",
+    "time_to_write": 714.0,
+    "active_links": 42,
+    "badwidth_consumption": 1008.0
+  },
+  "95": {
+    "selected_topology": "rt",
+    "time_to_write": 2496.0,
+    "active_links": 192,
+    "badwidth_consumption": 4800.0
+  },
+  "96": {
+    "selected_topology": "mst",
+    "time_to_write": 1122.0,
+    "active_links": 66,
+    "badwidth_consumption": 1914.0
+  },
+  "97": {
+    "selected_topology": "rt",
+    "time_to_write": 3936.0,
+    "active_links": 246,
+    "badwidth_consumption": 6642.0
+  },
+  "10": {
+    "selected_topology": "rt",
+    "time_to_write": 3133.0,
+    "active_links": 241,
+    "badwidth_consumption": 5784.0
+  },
+  "98": {
+    "selected_topology": "rt",
+    "time_to_write": 2640.0,
+    "active_links": 220,
+    "badwidth_consumption": 4400.0
+  },
+  "11": {
+    "selected_topology": "rt",
+    "time_to_write": 3553.0,
+    "active_links": 187,
+    "badwidth_consumption": 5610.0
+  },
+  "99": {
+    "selected_topology": "mst",
+    "time_to_write": 1235.0,
+    "active_links": 95,
+    "badwidth_consumption": 2185.0
+  },
+  "12": {
+    "selected_topology": "rt",
+    "time_to_write": 4356.0,
+    "active_links": 242,
+    "badwidth_consumption": 6776.0
+  },
+  "13": {
+    "selected_topology": "rt",
+    "time_to_write": 2584.0,
+    "active_links": 152,
+    "badwidth_consumption": 3192.0
+  },
+  "14": {
+    "selected_topology": "mst",
+    "time_to_write": 1976.0,
+    "active_links": 104,
+    "badwidth_consumption": 3016.0
+  },
+  "15": {
+    "selected_topology": "rt",
+    "time_to_write": 2700.0,
+    "active_links": 225,
+    "badwidth_consumption": 4950.0
+  },
+  "16": {
+    "selected_topology": "rt",
+    "time_to_write": 2548.0,
+    "active_links": 196,
+    "badwidth_consumption": 5684.0
+  },
+  "17": {
+    "selected_topology": "mst",
+    "time_to_write": 2242.0,
+    "active_links": 118,
+    "badwidth_consumption": 3540.0
+  },
+  "18": {
+    "selected_topology": "rt",
+    "time_to_write": 2869.0,
+    "active_links": 151,
+    "badwidth_consumption": 3926.0
+  },
+  "19": {
+    "selected_topology": "rt",
+    "time_to_write": 2754.0,
+    "active_links": 162,
+    "badwidth_consumption": 3888.0
+  },
+  "0": {
+    "selected_topology": "mst",
+    "time_to_write": 1661.0,
+    "active_links": 151,
+    "badwidth_consumption": 4530.0
+  },
+  "1": {
+    "selected_topology": "mst",
+    "time_to_write": 1020.0,
+    "active_links": 68,
+    "badwidth_consumption": 1496.0
+  },
+  "2": {
+    "selected_topology": "rt",
+    "time_to_write": 2720.0,
+    "active_links": 160,
+    "badwidth_consumption": 3520.0
+  },
+  "3": {
+    "selected_topology": "mst",
+    "time_to_write": 996.0,
+    "active_links": 83,
+    "badwidth_consumption": 1826.0
+  },
+  "4": {
+    "selected_topology": "rt",
+    "time_to_write": 2826.0,
+    "active_links": 157,
+    "badwidth_consumption": 3454.0
+  },
+  "5": {
+    "selected_topology": "rt",
+    "time_to_write": 2534.0,
+    "active_links": 181,
+    "badwidth_consumption": 5430.0
+  },
+  "6": {
+    "selected_topology": "mst",
+    "time_to_write": 1605.0,
+    "active_links": 107,
+    "badwidth_consumption": 2247.0
+  },
+  "7": {
+    "selected_topology": "mst",
+    "time_to_write": 1260.0,
+    "active_links": 70,
+    "badwidth_consumption": 1750.0
+  },
+  "8": {
+    "selected_topology": "rt",
+    "time_to_write": 2655.0,
+    "active_links": 177,
+    "badwidth_consumption": 4956.0
+  },
+  "9": {
+    "selected_topology": "mst",
+    "time_to_write": 1551.0,
+    "active_links": 141,
+    "badwidth_consumption": 3102.0
+  },
+  "20": {
+    "selected_topology": "rt",
+    "time_to_write": 3080.0,
+    "active_links": 154,
+    "badwidth_consumption": 4312.0
+  },
+  "21": {
+    "selected_topology": "rt",
+    "time_to_write": 4160.0,
+    "active_links": 208,
+    "badwidth_consumption": 6032.0
+  },
+  "22": {
+    "selected_topology": "mst",
+    "time_to_write": 375.0,
+    "active_links": 25,
+    "badwidth_consumption": 675.0
+  },
+  "23": {
+    "selected_topology": "rt",
+    "time_to_write": 4700.0,
+    "active_links": 235,
+    "badwidth_consumption": 6345.0
+  },
+  "24": {
+    "selected_topology": "mst",
+    "time_to_write": 2286.0,
+    "active_links": 127,
+    "badwidth_consumption": 3556.0
+  },
+  "25": {
+    "selected_topology": "mst",
+    "time_to_write": 2156.0,
+    "active_links": 154,
+    "badwidth_consumption": 3388.0
+  },
+  "26": {
+    "selected_topology": "rt",
+    "time_to_write": 3162.0,
+    "active_links": 186,
+    "badwidth_consumption": 4650.0
+  },
+  "27": {
+    "selected_topology": "mst",
+    "time_to_write": 1632.0,
+    "active_links": 96,
+    "badwidth_consumption": 2400.0
+  },
+  "28": {
+    "selected_topology": "mst",
+    "time_to_write": 2190.0,
+    "active_links": 146,
+    "badwidth_consumption": 4380.0
+  },
+  "29": {
+    "selected_topology": "mst",
+    "time_to_write": 1404.0,
+    "active_links": 117,
+    "badwidth_consumption": 2925.0
+  },
+  "30": {
+    "selected_topology": "rt",
+    "time_to_write": 3940.0,
+    "active_links": 197,
+    "badwidth_consumption": 3940.0
+  },
+  "31": {
+    "selected_topology": "rt",
+    "time_to_write": 4720.0,
+    "active_links": 236,
+    "badwidth_consumption": 4956.0
+  },
+  "32": {
+    "selected_topology": "rt",
+    "time_to_write": 2310.0,
+    "active_links": 165,
+    "badwidth_consumption": 3795.0
+  },
+  "33": {
+    "selected_topology": "mst",
+    "time_to_write": 1210.0,
+    "active_links": 110,
+    "badwidth_consumption": 2530.0
+  },
+  "34": {
+    "selected_topology": "rt",
+    "time_to_write": 1694.0,
+    "active_links": 154,
+    "badwidth_consumption": 4158.0
+  },
+  "35": {
+    "selected_topology": "rt",
+    "time_to_write": 1560.0,
+    "active_links": 156,
+    "badwidth_consumption": 3900.0
+  },
+  "36": {
+    "selected_topology": "rt",
+    "time_to_write": 3876.0,
+    "active_links": 204,
+    "badwidth_consumption": 5100.0
+  },
+  "37": {
+    "selected_topology": "rt",
+    "time_to_write": 2170.0,
+    "active_links": 217,
+    "badwidth_consumption": 4340.0
+  },
+  "38": {
+    "selected_topology": "rt",
+    "time_to_write": 4120.0,
+    "active_links": 206,
+    "badwidth_consumption": 4120.0
+  },
+  "39": {
+    "selected_topology": "mst",
+    "time_to_write": 979.0,
+    "active_links": 89,
+    "badwidth_consumption": 1869.0
+  },
+  "40": {
+    "selected_topology": "mst",
+    "time_to_write": 1290.0,
+    "active_links": 86,
+    "badwidth_consumption": 2494.0
+  },
+  "41": {
+    "selected_topology": "rt",
+    "time_to_write": 4040.0,
+    "active_links": 202,
+    "badwidth_consumption": 4646.0
+  },
+  "42": {
+    "selected_topology": "mst",
+    "time_to_write": 470.0,
+    "active_links": 47,
+    "badwidth_consumption": 1410.0
+  },
+  "43": {
+    "selected_topology": "mst",
+    "time_to_write": 825.0,
+    "active_links": 75,
+    "badwidth_consumption": 1650.0
+  },
+  "44": {
+    "selected_topology": "mst",
+    "time_to_write": 1027.0,
+    "active_links": 79,
+    "badwidth_consumption": 2370.0
+  },
+  "45": {
+    "selected_topology": "mst",
+    "time_to_write": 286.0,
+    "active_links": 26,
+    "badwidth_consumption": 702.0
+  },
+  "46": {
+    "selected_topology": "mst",
+    "time_to_write": 1430.0,
+    "active_links": 110,
+    "badwidth_consumption": 2420.0
+  },
+  "47": {
+    "selected_topology": "mst",
+    "time_to_write": 1800.0,
+    "active_links": 90,
+    "badwidth_consumption": 1980.0
+  },
+  "48": {
+    "selected_topology": "mst",
+    "time_to_write": 1695.0,
+    "active_links": 113,
+    "badwidth_consumption": 3277.0
+  },
+  "49": {
+    "selected_topology": "rt",
+    "time_to_write": 4460.0,
+    "active_links": 223,
+    "badwidth_consumption": 6244.0
+  },
+  "50": {
+    "selected_topology": "rt",
+    "time_to_write": 2050.0,
+    "active_links": 205,
+    "badwidth_consumption": 4305.0
+  },
+  "51": {
+    "selected_topology": "rt",
+    "time_to_write": 3980.0,
+    "active_links": 199,
+    "badwidth_consumption": 5970.0
+  },
+  "52": {
+    "selected_topology": "mst",
+    "time_to_write": 728.0,
+    "active_links": 52,
+    "badwidth_consumption": 1456.0
+  },
+  "53": {
+    "selected_topology": "mst",
+    "time_to_write": 2516.0,
+    "active_links": 148,
+    "badwidth_consumption": 3108.0
+  },
+  "54": {
+    "selected_topology": "rt",
+    "time_to_write": 3360.0,
+    "active_links": 168,
+    "badwidth_consumption": 4368.0
+  },
+  "55": {
+    "selected_topology": "mst",
+    "time_to_write": 385.0,
+    "active_links": 35,
+    "badwidth_consumption": 875.0
+  },
+  "56": {
+    "selected_topology": "mst",
+    "time_to_write": 2960.0,
+    "active_links": 148,
+    "badwidth_consumption": 3404.0
+  },
+  "57": {
+    "selected_topology": "rt",
+    "time_to_write": 4256.0,
+    "active_links": 224,
+    "badwidth_consumption": 5376.0
+  },
+  "58": {
+    "selected_topology": "rt",
+    "time_to_write": 3582.0,
+    "active_links": 199,
+    "badwidth_consumption": 4975.0
+  },
+  "59": {
+    "selected_topology": "mst",
+    "time_to_write": 2041.0,
+    "active_links": 157,
+    "badwidth_consumption": 4239.0
+  },
+  "60": {
+    "selected_topology": "mst",
+    "time_to_write": 1062.0,
+    "active_links": 59,
+    "badwidth_consumption": 1770.0
+  },
+  "61": {
+    "selected_topology": "mst",
+    "time_to_write": 1568.0,
+    "active_links": 112,
+    "badwidth_consumption": 3360.0
+  },
+  "62": {
+    "selected_topology": "mst",
+    "time_to_write": 1430.0,
+    "active_links": 143,
+    "badwidth_consumption": 3432.0
+  },
+  "63": {
+    "selected_topology": "mst",
+    "time_to_write": 1100.0,
+    "active_links": 55,
+    "badwidth_consumption": 1485.0
+  },
+  "64": {
+    "selected_topology": "rt",
+    "time_to_write": 1630.0,
+    "active_links": 163,
+    "badwidth_consumption": 3586.0
+  },
+  "65": {
+    "selected_topology": "mst",
+    "time_to_write": 1368.0,
+    "active_links": 76,
+    "badwidth_consumption": 1976.0
+  },
+  "66": {
+    "selected_topology": "rt",
+    "time_to_write": 3002.0,
+    "active_links": 158,
+    "badwidth_consumption": 4740.0
+  },
+  "67": {
+    "selected_topology": "rt",
+    "time_to_write": 2618.0,
+    "active_links": 154,
+    "badwidth_consumption": 3080.0
+  },
+  "68": {
+    "selected_topology": "rt",
+    "time_to_write": 2646.0,
+    "active_links": 189,
+    "badwidth_consumption": 4158.0
+  },
+  "69": {
+    "selected_topology": "mst",
+    "time_to_write": 759.0,
+    "active_links": 69,
+    "badwidth_consumption": 1932.0
+  },
+  "70": {
+    "selected_topology": "mst",
+    "time_to_write": 660.0,
+    "active_links": 55,
+    "badwidth_consumption": 1485.0
+  },
+  "71": {
+    "selected_topology": "rt",
+    "time_to_write": 3780.0,
+    "active_links": 210,
+    "badwidth_consumption": 6090.0
+  },
+  "72": {
+    "selected_topology": "mst",
+    "time_to_write": 975.0,
+    "active_links": 65,
+    "badwidth_consumption": 1950.0
+  },
+  "73": {
+    "selected_topology": "rt",
+    "time_to_write": 2470.0,
+    "active_links": 190,
+    "badwidth_consumption": 4940.0
+  },
+  "74": {
+    "selected_topology": "rt",
+    "time_to_write": 2580.0,
+    "active_links": 172,
+    "badwidth_consumption": 3612.0
+  },
+  "75": {
+    "selected_topology": "rt",
+    "time_to_write": 2422.0,
+    "active_links": 173,
+    "badwidth_consumption": 4498.0
+  },
+  "76": {
+    "selected_topology": "mst",
+    "time_to_write": 1060.0,
+    "active_links": 106,
+    "badwidth_consumption": 2120.0
+  },
+  "77": {
+    "selected_topology": "rt",
+    "time_to_write": 2532.0,
+    "active_links": 211,
+    "badwidth_consumption": 5697.0
+  },
+  "78": {
+    "selected_topology": "rt",
+    "time_to_write": 3164.0,
+    "active_links": 226,
+    "badwidth_consumption": 6328.0
+  },
+  "79": {
+    "selected_topology": "rt",
+    "time_to_write": 2190.0,
+    "active_links": 219,
+    "badwidth_consumption": 5256.0
+  },
+  "80": {
+    "selected_topology": "mst",
+    "time_to_write": 994.0,
+    "active_links": 71,
+    "badwidth_consumption": 1704.0
+  },
+  "81": {
+    "selected_topology": "rt",
+    "time_to_write": 2210.0,
+    "active_links": 170,
+    "badwidth_consumption": 4930.0
+  },
+  "82": {
+    "selected_topology": "mst",
+    "time_to_write": 1037.0,
+    "active_links": 61,
+    "badwidth_consumption": 1403.0
+  },
+  "83": {
+    "selected_topology": "rt",
+    "time_to_write": 2720.0,
+    "active_links": 170,
+    "badwidth_consumption": 4420.0
+  },
+  "84": {
+    "selected_topology": "rt",
+    "time_to_write": 2772.0,
+    "active_links": 231,
+    "badwidth_consumption": 5775.0
+  },
+  "85": {
+    "selected_topology": "rt",
+    "time_to_write": 3570.0,
+    "active_links": 238,
+    "badwidth_consumption": 6902.0
+  },
+  "86": {
+    "selected_topology": "rt",
+    "time_to_write": 2436.0,
+    "active_links": 203,
+    "badwidth_consumption": 5887.0
+  },
+  "87": {
+    "selected_topology": "mst",
+    "time_to_write": 1956.0,
+    "active_links": 163,
+    "badwidth_consumption": 3260.0
+  }
+}

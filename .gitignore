@@ -1,0 +1,66 @@
+# Eclipse IDE
+.settings/
+.project
+.classpath
+.metadata/
+bin/
+*.launch
+*.pydevproject
+.cproject
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+*.log
+hs_err_pid*
+replay_pid*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE - IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# IDE - VS Code
+.vscode/
+*.code-workspace
+.claude/
+.cursor/
+
+# OS
+.DS_Store
+.DS_Store?
+
+# Project specific
+output_dir/
+*.txt
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.cache/
