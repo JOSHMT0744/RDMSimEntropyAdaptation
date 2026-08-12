@@ -19,18 +19,13 @@
 package pomdp;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 
-import deltaiot.services.Link;
-import simulator.QoS;
+import remotemirroring.RDMSimConnector;
+import remotemirroring.ResultsLog;
 import solver.BeliefPoint;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
-public class POMDP {
-	private static final Logger log = LogManager.getLogger(POMDP.class);	
+public class POMDP {	
 	private String filename;
 	private String instanceName;
 	private int nStates;
@@ -45,42 +40,14 @@ public class POMDP {
 	private double[][][] observationFunction;
 	private double minReward = Double.POSITIVE_INFINITY;
 	
-	// alpha vectors for Dir(.) distribution representing transition probabilities
-	public double[][][] transitionBeliefReset;
-	public double[][][] transitionBeliefCurr;
-	public double[][][] observationBelief;
-	
-	// vectors storing entropy at each timestep for transition belief distributions
-	public double[] entropy;
-	
 	private BeliefPoint b0;
 	
 	private HashMap<Integer,String> actionLabels;
 	
-	/** NFR thresholds for state discretisation: MEC = energy consumption (default 20), RPL = packet loss ratio (default 0.2). */
-	private double mecThreshold = 20.0;
-	private double rplThreshold = 0.20;
-	
-	public POMDP(String filename, 
-			int nStates, 
-			int nActions, 
-			int nObservations, 
-			double discountFactor, 
-			double[][] rewardFunction, 
-			double[][][] transitionFunction, 
-			double[][][] observationFunction, 
-			HashMap<Integer,String> actionLabels, 
-			BeliefPoint b0,
-			double[][][] transitionBeliefReset, // effectively a collection of SxA dirichlet distribution hyperparameter collections of size S
-			double[][][] transitionBeliefCurr,
-			double [][][] observationBelief
-			) {		
-		// Extract just the filename, handling both Windows (\) and Unix (/) path separators
-		String separator = filename.contains("\\") ? "\\\\" : "/";
-		String[] filenameSplit = filename.split(separator);
+	public POMDP(String filename, int nStates, int nActions, int nObservations, double discountFactor, double[][] rewardFunction, double[][][] transitionFunction, double[][][] observationFunction, HashMap<Integer,String> actionLabels, BeliefPoint b0) {		
+		String[] filenameSplit = filename.split("/");
 		this.filename = filenameSplit[filenameSplit.length-1];
-		// Remove .POMDP extension to get instance name
-		this.instanceName = this.filename.replace(".POMDP", "").replace(".pomdp", "");
+		this.instanceName = filenameSplit[filenameSplit.length-1].replace(".POMDP", "");
 		this.nStates = nStates;
 		this.nActions = nActions;
 		this.nObservations = nObservations;
@@ -90,14 +57,6 @@ public class POMDP {
 		this.observationFunction = observationFunction;
 		this.actionLabels = actionLabels;
 		this.b0 = b0;
-				
-		// Using beliefs instead of fixed probs for transitions
-		this.transitionBeliefReset = transitionBeliefReset;
-		this.transitionBeliefCurr = transitionBeliefCurr;
-		
-		// Also perform Bayesian updating for observation functions
-		this.observationBelief = observationBelief;
-		
 		
 		// compute min reward
 		for(int s=0; s<nStates; s++) {
@@ -124,22 +83,18 @@ public class POMDP {
 	}
 	
 	public double getTransitionProbability(int s, int a, int sNext) {
-		assert s < nStates && a < nActions && sNext < nStates;
-		// take expectation over beliefs as an update of the world model
-		double worldTransitionFn = transitionBeliefCurr[s][a][sNext] / (Arrays.stream(transitionBeliefCurr[s][a]).sum()); 
-		return worldTransitionFn;
+		assert s<nStates && a<nActions && sNext<nStates;
+		return transitionFunction[s][a][sNext];
 	}
-		
+	
 	public double getReward(int s, int a) {
-		assert s < nStates && a < nActions;
+		assert s<nStates && a<nActions;
 		return rewardFunction[s][a];
 	}
 	
 	public double getObservationProbability(int a, int sNext, int o) {
-		assert a < nActions && sNext<nStates && o < nObservations;
-		// take expectation voer belifs as an update of the world model
-		double worldObservationFn = observationBelief[a][sNext][o] / (Arrays.stream(observationBelief[a][sNext]).sum()); 
-		return worldObservationFn;
+		assert a<nActions && sNext<nStates && o<nObservations;
+		return observationFunction[a][sNext][o];
 	}
 	
 	public double getMinReward() {
@@ -158,15 +113,8 @@ public class POMDP {
 		return actionLabels.get(a);
 	}
 	
-	/**
-	 * 
-	 * @param b = belief at current timestep
-	 * @param a = action executed by SAS
-	 * @param o = observation from action a
-	 * @return
-	 */
 	public BeliefPoint updateBelief(BeliefPoint b, int a, int o) {
-		assert a < nActions && o < nObservations;
+		assert a<nActions && o<nObservations;
 		double[] newBelief = new double[nStates];
 		
 		// check if belief point has been prepared
@@ -179,12 +127,10 @@ public class POMDP {
 		assert nc > 0.0 : "o cannot be observed when executing a in belief b";
 		
 		// compute the new belief vector
-		// -> For each state we are "possibly" in (according to belief likelihood), calculate transition probability for each state we could "possibly" end up in
-		for(int sNext = 0; sNext < nStates; sNext++) {
+		for(int sNext=0; sNext<nStates; sNext++) {
 			double beliefEntry = 0.0;
 			
-			for(int s = 0; s < nStates; s++) {
-				// getTransitionProbability(s, a, sNext) is X_n (in  S!S!L)
+			for(int s=0; s<nStates; s++) {
 				beliefEntry += getTransitionProbability(s, a, sNext) * b.getBelief(s);
 			}
 			
@@ -194,35 +140,27 @@ public class POMDP {
 		return new BeliefPoint(newBelief);
 	}
 	
-	/**
-	 * Calculates the `aoprobs` for the belief, b. 
-	 * This is done by iterating over the matrix and for each possible state, calculate the transition probability (getTransitionProbability()).
-	 * Then sum the average probability based on confidence across all belief state probabilities.
-	 * @param b
-	 */
 	public void prepareBelief(BeliefPoint b) {
 		assert b != null;
 		if(b.hasActionObservationProbabilities()) return;
 		
 		double[][] aoProbs = new double[nActions][nObservations];
 		
-		for(int action = 0; action < nActions; action++) {
-			for(int obs=0; obs < nObservations; obs++) {
+		for(int a=0; a<nActions; a++) {
+			for(int o=0; o<nObservations; o++) {
 				double prob = 0.0;
 				
-				for(int sNext=0; sNext < nStates; sNext++) {
+				for(int sNext=0; sNext<nStates; sNext++) {
 					double p = 0.0;
 					
 					for(int s=0; s<nStates; s++) {
-						// p = the belief-confidence averaged transition probability
-						// so p is effectively the belief's quantification of T(s', s, a)
-						p += getTransitionProbability(s, action, sNext) * b.getBelief(s);
+						p += getTransitionProbability(s, a, sNext) * b.getBelief(s);
 					}
 					
-					prob += getObservationProbability(action, sNext, obs) * p;
+					prob += getObservationProbability(a, sNext, o) * p;
 				}
 				
-				aoProbs[action][obs] = prob;
+				aoProbs[a][o] = prob;
 			}
 		}
 		
@@ -232,167 +170,288 @@ public class POMDP {
 	public BeliefPoint getInitialBelief() {
 		return b0;
 	}
-	
+	/////Added for for IoT
 	public void setInitialBelief(BeliefPoint b)
 	{
 		b0=b;
-	}	
-	
-	public int nextState(int currentState, int action) {
-		// Use the active connector instance instead of creating a new one
-		// The active instance has noiseInjector properly configured
-		iot.DeltaIOTConnector dataConnector = iot.DeltaIOTConnector.activeInstance;
-		if (dataConnector == null) {
-			log.warn("activeInstance is null in POMDP.nextState(), creating fallback instance");
-			dataConnector = new iot.DeltaIOTConnector();
-		}
-		
-		if(action == 0) {
-			System.out.println("DTP");
-			dataConnector.performDTP(); // decrease transmission power			
-		}
-		else if(action==1) {
-			log.trace("Action: ITP");
-			dataConnector.performITP();	 // increase transmission power		
-		}
-		
-		// Note: This method is called during performAction() to determine the next state
-		// The action (DTP/ITP) has just been executed, changing the network configuration.
-		// At this point in execution:
-		// - The previous mote's post-action run has been completed and timestepiot points to it
-		// - This previous mote's post-action state serves as the baseline for the current mote
-		// - The current mote's action has just been executed but not yet simulated
-		// - We use the baseline QoS (previous mote's post-action state) to estimate the next state
-		// 
-		// Since we're in a sequential loop over motes, each mote's baseline is the previous
-		// mote's post-action state. Therefore, timestepiot directly points to the baseline run.
-		// 
-		// Edge case: For the first mote in timestep 0, timestepiot = 0, so currentRun = 1.
-		// Since run 1 doesn't exist yet, waitForQoSDataReady() will return null/empty,
-		// and we'll return currentState as fallback (which is correct for the initial state).
-		int requestedRun = iot.DeltaIOTConnector.timestepiot;
-		
-		// Use timestepiot directly to get the previous mote's post-action run, which serves
-		// as the baseline for the current mote. This run has complete QoS data for all motes.
-		// Math.max(1, ...) ensures we never request run 0 (simulator uses 1-indexed runs).
-		int currentRun = Math.max(1, requestedRun);
-
-		// Wait for QoS data to be ready before accessing it to prevent warnings
-		ArrayList<QoS> result = iot.QoSDataHelper.waitForQoSDataReady(currentRun, 20, 200);
-		if (result == null || result.isEmpty()) {
-			log.warn("No QoS data for run {} (requested {}) in nextState(), using current state", currentRun, requestedRun);
-			// Return current state as fallback
-			return currentState;
-		}
-		double packetLoss = result.get(result.size()-1).getPacketLoss();
-		// This is being performed inside of loop of the motes, so use timestepiot to get QoS for that specific mote
-		double energyConsumption = result.get(result.size()-1).getEnergyConsumption();
-		
-		if(energyConsumption < mecThreshold && packetLoss < rplThreshold) {
-			return 0;
-		}
-		else if(energyConsumption < mecThreshold && packetLoss >= rplThreshold) {
-			return 1;
-		}
-		else if(energyConsumption >= mecThreshold && packetLoss < rplThreshold) {
-			return 2;
-		}
-		else if(energyConsumption >= mecThreshold && packetLoss >= rplThreshold) {
-			return 3;
-		}
-		
-		return 0;
 	}
 	
-	///Set it to currentState at the beginning. Each integer indicates the state
-	public int getInitialState() {
-		// At the start of timestep t (t>0), we need the network state from the END of the previous timestep.
-		// That is the last run of timestep t-1, i.e. run = timestepiot (which equals t * numMotes at timestep start).
-		// Using run 1 would use stale QoS from the very first run and prevents the belief from reflecting reality.
-		int runForTimestepStart = Math.max(1, iot.DeltaIOTConnector.timestepiot);
-		ArrayList<QoS> result = iot.QoSDataHelper.waitForQoSDataReady(runForTimestepStart, 20, 100);
-		
-		if (result == null || result.isEmpty()) {
-			System.err.println("Warning: No QoS data available for run " + runForTimestepStart + " in getInitialState(), using default state 0");
-			return 0;
-		}
-		
-		log.trace("getInitialState result size: {}", result.size());
-		// Get PL and EC at current timestep
-		double packetLoss = result.get(result.size()-1).getPacketLoss();
-		double energyConsumption = result.get(result.size()-1).getEnergyConsumption();
-		
-		if(energyConsumption < mecThreshold && packetLoss < rplThreshold) {
-			return 0;
-		}
-		else if(energyConsumption < mecThreshold && packetLoss >= rplThreshold) {
-			return 1;
-		}
-		else if(energyConsumption >= mecThreshold && packetLoss < rplThreshold) {
-			return 2;
-		}
-		else if(energyConsumption >= mecThreshold && packetLoss >= rplThreshold) {
-			return 3;
-		}
-		
-		return 0;
-	}
-	
-	public int getCurrentState() {
+	public int getCurrentState()
+	{
 		return currentState;
 	}
 	
-	public void setCurrentState(int s) {
+	public void setCurrentState(int s)
+	{
 		currentState=s;
 	}
 	
-	/** Set MEC (energy consumption) threshold for state discretisation; satisfied when energy < threshold. */
-	public void setMecThreshold(double mecThreshold) {
-		this.mecThreshold = mecThreshold;
-	}
-	
-	public double getMecThreshold() {
-		return mecThreshold;
-	}
-	
-	/** Set RPL (packet loss ratio) threshold for state discretisation; satisfied when packetLoss < threshold. */
-	public void setRplThreshold(double rplThreshold) {
-		this.rplThreshold = rplThreshold;
-	}
-	
-	public double getRplThreshold() {
-		return rplThreshold;
-	}
-	
-	
-	public int getObservation(Integer action, Integer statePrime) {
-		// TODO Auto-generated method stub
+	/**
+	 * To perform Action for RDM
+	 * @param currentState
+	 * @param action
+	 * @return
+	 */
+	public int nextStateRDM(int currentState, int selectedaction) {
 		
-		log.trace("getObservation: mote {}", iot.DeltaIOTConnector.selectedmote.getMoteid());
-		for (Link link : iot.DeltaIOTConnector.selectedmote.getLinks()) {	
-			log.trace("Link SNR={}, distribution={}", link.getSNR(), link.getDistribution());
-		//if (link.getSNR() > 0 && link.getPower()>0) {
-			if (link.getSNR() > 0) {
-				//DeltaIOTConnector.selectedmote=m;
-				//DeltaIOTConnector.selectedlink=link;
-				return 2;
-			}
-			else if (link.getSNR() == 0) {
-				//DeltaIOTConnector.selectedmote=m;
-				//DeltaIOTConnector.selectedlink=link;
-				return 1;
-			}
-			//else if (link.getSNR()<0 && link.getPower()<15) {
-			else if (link.getSNR() <0) {
-				//DeltaIOTConnector.selectedmote=m;
-				//DeltaIOTConnector.selectedlink=link;
-				return 0;
-			}
+		System.out.println("Setting network topology");
+		if(selectedaction==0)
+		{
+			System.out.println("MST");
+			RDMSimConnector.effector.setNetworkTopology(RDMSimConnector.timestep, "mst");
 		}
+		else
+		{
+			System.out.println("RT");
+			RDMSimConnector.effector.setNetworkTopology(RDMSimConnector.timestep, "rt");
+		}
+		
+		int al=RDMSimConnector.probe.getActiveLinks();
+		double bw=RDMSimConnector.probe.getBandwidthConsumption();
+		double ttw=RDMSimConnector.probe.getTimeToWrite();
+		
+		if(bw<=RDMSimConnector.network_management.network_properties.m.getThresholdBandwidthConsumption()&&al>=RDMSimConnector.network_management.network_properties.m.getThresholdActiveLinks()&&ttw<=RDMSimConnector.network_management.network_properties.m.getThresholdTimeToWrite())
+		{
+			return 0;
+		}
+		else if(bw<=RDMSimConnector.network_management.network_properties.m.getThresholdBandwidthConsumption()&&al>=RDMSimConnector.network_management.network_properties.m.getThresholdActiveLinks()&&ttw>RDMSimConnector.network_management.network_properties.m.getThresholdTimeToWrite())
+		{
+			return 1;
+		}
+		else if(bw<=RDMSimConnector.network_management.network_properties.m.getThresholdBandwidthConsumption()&&al<RDMSimConnector.network_management.network_properties.m.getThresholdActiveLinks()&&ttw<=RDMSimConnector.network_management.network_properties.m.getThresholdTimeToWrite())
+		{
+			return 2;
+		}
+		else if(bw<=RDMSimConnector.network_management.network_properties.m.getThresholdBandwidthConsumption()&&al<RDMSimConnector.network_management.network_properties.m.getThresholdActiveLinks()&&ttw>RDMSimConnector.network_management.network_properties.m.getThresholdTimeToWrite())
+		{
+			return 3;
+		}
+		else if(bw>RDMSimConnector.network_management.network_properties.m.getThresholdBandwidthConsumption()&&al>=RDMSimConnector.network_management.network_properties.m.getThresholdActiveLinks()&&ttw<=RDMSimConnector.network_management.network_properties.m.getThresholdTimeToWrite())
+		{
+			return 4;
+		}
+		else if(bw>RDMSimConnector.network_management.network_properties.m.getThresholdBandwidthConsumption()&&al>=RDMSimConnector.network_management.network_properties.m.getThresholdActiveLinks()&&ttw>RDMSimConnector.network_management.network_properties.m.getThresholdTimeToWrite())
+		{
+			return 5;
+		}
+		else if(bw>RDMSimConnector.network_management.network_properties.m.getThresholdBandwidthConsumption()&&al<RDMSimConnector.network_management.network_properties.m.getThresholdActiveLinks()&&ttw<=RDMSimConnector.network_management.network_properties.m.getThresholdTimeToWrite())
+		{
+			return 6;
+		}
+		else if(bw>RDMSimConnector.network_management.network_properties.m.getThresholdBandwidthConsumption()&&al<RDMSimConnector.network_management.network_properties.m.getThresholdActiveLinks()&&ttw>RDMSimConnector.network_management.network_properties.m.getThresholdTimeToWrite())
+		{
+			return 7;
+		}
+		
+		
+		
+		
 		return 0;
-	}			
+	}
+	
+	
+	public int getObservation(int action, int statePrime) {
+		
+		int obs=-1;
+		double anl_sMR=RDMSimConnector.probe.getActiveLinks();
+		double rec_sMEC=RDMSimConnector.probe.getBandwidthConsumption();
+		double sMP=RDMSimConnector.probe.getTimeToWrite();		
+		
+		double links_min, links_max;
+		links_min=(RDMSimConnector.network_management.network_properties.number_of_links/3);
+		links_max=(links_min*2);
+		double band_min,band_max;
+		band_min=(RDMSimConnector.network_management.network_properties.number_of_links*30/3);
+		band_max=band_min*2;
+		double ttw_min,ttw_max;
+		ttw_min=(RDMSimConnector.network_management.network_properties.number_of_links*20/3);
+		ttw_max=band_min*2;
+		
+		if (rec_sMEC < band_min && anl_sMR < links_min & sMP<ttw_min) {
+			// return the observation
+			obs =0;
+
+		}
+		else if (rec_sMEC < band_min && anl_sMR < links_min&&(sMP>=ttw_min&&sMP<=ttw_max)) {
+			// return the observation
+			obs = 1;
+
+		}  
+		else if (rec_sMEC < band_min && anl_sMR < links_min&& sMP>ttw_max) {
+			// return the observation
+			obs = 2;
+
+		}  
+		else if (rec_sMEC < band_min && (anl_sMR >= links_min && anl_sMR <= links_max)&&sMP<ttw_min) {
+			obs = 3;
+		} 
+		else if (rec_sMEC < band_min && (anl_sMR >= links_min && anl_sMR <= links_max)&&(sMP>=ttw_min&&sMP<=ttw_max)) {
+			obs = 4;
+		}
+		else if (rec_sMEC < band_min && (anl_sMR >= links_min && anl_sMR <= links_max)&&sMP>ttw_max) {
+			obs = 5;
+		} 
+		else if (rec_sMEC < band_min && anl_sMR > links_max&&sMP<ttw_min) {
+			obs = 6;
+		} 
+		else if (rec_sMEC < band_min && anl_sMR > links_max&&(sMP>=ttw_min&&sMP<=ttw_max)) {
+			obs = 7;
+		} 
+		else if (rec_sMEC < band_min && anl_sMR > links_max&&sMP>ttw_max) {
+			obs = 8;
+		} 
+		
+		else if ((rec_sMEC >= band_min && rec_sMEC <= band_max) && anl_sMR < links_min&&sMP<ttw_min) {
+			// return the observation
+			obs = 9;
+		}
+		else if ((rec_sMEC >= band_min && rec_sMEC <= band_max) && anl_sMR < links_min&&(sMP>=ttw_min&&sMP<=ttw_max)) {
+			// return the observation
+			obs = 10;
+		}
+		else if ((rec_sMEC >= band_min && rec_sMEC <= band_max) && anl_sMR < links_min&&sMP>ttw_max) {
+			// return the observation
+			obs = 11;
+		}
+		
+		else if ((rec_sMEC >= band_min && rec_sMEC <= band_max) && (anl_sMR >= links_min && anl_sMR <= links_max)&&sMP<ttw_min) {
+			obs = 12;
+		}
+		else if ((rec_sMEC >= band_min && rec_sMEC <= band_max) && (anl_sMR >= links_min && anl_sMR <= links_max)&&(sMP>=ttw_min&&sMP<=ttw_max)) {
+			obs = 13;
+		}
+		else if ((rec_sMEC >= band_min && rec_sMEC <= band_max) && (anl_sMR >= links_min && anl_sMR <= links_max)&&sMP>ttw_max) {
+			obs = 14;
+		}
+		
+		else if ((rec_sMEC >= band_min && rec_sMEC <= band_max) && anl_sMR > links_max&&sMP<ttw_min) {
+			obs = 15;
+		}
+		else if ((rec_sMEC >= band_min && rec_sMEC <= band_max) && anl_sMR > links_max&&(sMP>=ttw_min&&sMP<=ttw_max)) {
+			obs = 16;
+		}
+		else if ((rec_sMEC >= band_min && rec_sMEC <= band_max) && anl_sMR > links_max&&sMP>ttw_max) {
+			obs = 17;
+		}
+		
+		
+		else if ((rec_sMEC >band_max) && anl_sMR < links_min&&sMP<ttw_min) {
+			// return the observation
+			obs = 18;
+		} 
+		else if ((rec_sMEC > band_max) && anl_sMR < links_min&&(sMP>=ttw_min&&sMP<=ttw_max)) {
+			// return the observation
+			obs = 19;
+		} 
+		else if ((rec_sMEC >band_max) && anl_sMR < links_min&&sMP>ttw_max) {
+			// return the observation
+			obs = 20;
+		} 
+		
+		
+		else if ((rec_sMEC >band_max) && (anl_sMR >= links_min && anl_sMR <= links_max)&&sMP<ttw_min) {
+			obs = 21;
+		} 
+		else if ((rec_sMEC >band_max) && (anl_sMR >= links_min && anl_sMR <= links_max)&&(sMP>=ttw_min&&sMP<=ttw_max)) {
+			obs = 22;
+		} 
+		else if ((rec_sMEC >band_max) && (anl_sMR >= links_min && anl_sMR <= links_max)&&sMP>ttw_max) {
+			obs = 23;
+		} 
+		
+		else if ((rec_sMEC >band_max) && anl_sMR >links_max&&sMP<ttw_min) {
+			obs = 24;
+		}
+		else if ((rec_sMEC >band_max) && anl_sMR > links_max&&(sMP>=ttw_min&&sMP<=ttw_max)) {
+			obs = 25;
+		}
+		else if ((rec_sMEC >band_max) && anl_sMR > links_max&&sMP>ttw_max) {
+			obs = 26;
+		}
+		
+		return obs;
+
+	}
+	
+	
+	public int getInitialStateRDM()
+	{
+		int al=RDMSimConnector.probe.getActiveLinks();
+		double bw=RDMSimConnector.probe.getBandwidthConsumption();
+		double ttw=RDMSimConnector.probe.getTimeToWrite();
+		
+		ResultsLog.activelinks=al;
+		ResultsLog.bandwidthconsumption=bw;
+		ResultsLog.timetowrite=ttw;
+		
+		if(bw<=RDMSimConnector.network_management.network_properties.m.getThresholdBandwidthConsumption()&&al>=RDMSimConnector.network_management.network_properties.m.getThresholdActiveLinks()&&ttw<=RDMSimConnector.network_management.network_properties.m.getThresholdTimeToWrite())
+		{
+			ResultsLog.satmc=1;
+			ResultsLog.satmr=1;
+			ResultsLog.satmp=1;
+			return 0;
+		}
+		else if(bw<=RDMSimConnector.network_management.network_properties.m.getThresholdBandwidthConsumption()&&al>=RDMSimConnector.network_management.network_properties.m.getThresholdActiveLinks()&&ttw>RDMSimConnector.network_management.network_properties.m.getThresholdTimeToWrite())
+		{
+			ResultsLog.satmc=1;
+			ResultsLog.satmr=1;
+			ResultsLog.satmp=0;
+			return 1;
+		}
+		else if(bw<=RDMSimConnector.network_management.network_properties.m.getThresholdBandwidthConsumption()&&al<RDMSimConnector.network_management.network_properties.m.getThresholdActiveLinks()&&ttw<=RDMSimConnector.network_management.network_properties.m.getThresholdTimeToWrite())
+		{
+			ResultsLog.satmc=1;
+			ResultsLog.satmr=0;
+			ResultsLog.satmp=1;
+			return 2;
+		}
+		else if(bw<=RDMSimConnector.network_management.network_properties.m.getThresholdBandwidthConsumption()&&al<RDMSimConnector.network_management.network_properties.m.getThresholdActiveLinks()&&ttw>RDMSimConnector.network_management.network_properties.m.getThresholdTimeToWrite())
+		{
+			ResultsLog.satmc=1;
+			ResultsLog.satmr=0;
+			ResultsLog.satmp=0;
+			return 3;
+		}
+		else if(bw>RDMSimConnector.network_management.network_properties.m.getThresholdBandwidthConsumption()&&al>=RDMSimConnector.network_management.network_properties.m.getThresholdActiveLinks()&&ttw<=RDMSimConnector.network_management.network_properties.m.getThresholdTimeToWrite())
+		{
+			ResultsLog.satmc=0;
+			ResultsLog.satmr=1;
+			ResultsLog.satmp=1;
+			return 4;
+		}
+		else if(bw>RDMSimConnector.network_management.network_properties.m.getThresholdBandwidthConsumption()&&al>=RDMSimConnector.network_management.network_properties.m.getThresholdActiveLinks()&&ttw>RDMSimConnector.network_management.network_properties.m.getThresholdTimeToWrite())
+		{
+			ResultsLog.satmc=0;
+			ResultsLog.satmr=1;
+			ResultsLog.satmp=0;
+			return 5;
+		}
+		else if(bw>RDMSimConnector.network_management.network_properties.m.getThresholdBandwidthConsumption()&&al<RDMSimConnector.network_management.network_properties.m.getThresholdActiveLinks()&&ttw<=RDMSimConnector.network_management.network_properties.m.getThresholdTimeToWrite())
+		{
+			ResultsLog.satmc=0;
+			ResultsLog.satmr=0;
+			ResultsLog.satmp=1;
+			return 6;
+		}
+		else if(bw>RDMSimConnector.network_management.network_properties.m.getThresholdBandwidthConsumption()&&al<RDMSimConnector.network_management.network_properties.m.getThresholdActiveLinks()&&ttw>RDMSimConnector.network_management.network_properties.m.getThresholdTimeToWrite())
+		{
+			ResultsLog.satmc=0;
+			ResultsLog.satmr=0;
+			ResultsLog.satmp=0;
+			return 7;
+		}
+		
+		
+		return 0;	
+	
+		
+	}
+	
+
+		
 }
 	
 	
 
 	
+

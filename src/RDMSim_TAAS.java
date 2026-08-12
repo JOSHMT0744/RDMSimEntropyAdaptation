@@ -19,6 +19,9 @@ import rdm.management.Effector;
 import rdm.management.NetworkManagment;
 import rdm.management.Probe;
 import rdm.management.RDMSimulator;
+import remotemirroring.RDMSimConnector;
+import remotemirroring.RDMTransitionProb;
+import remotemirroring.ResultsLog;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -68,22 +71,34 @@ public class RDMSim_TAAS {
 		configureDirectories();
 	}
 
-	/** Returns the configured output directory (from solver.config outputDirectory). Used when invoking createCharts.py. */
+	/**
+	 * Returns the configured output directory (from solver.config outputDirectory).
+	 * Used when invoking createCharts.py.
+	 */
 	public String getOutputDir() {
 		return sp.getOutputDir();
 	}
 
-	/** Returns mon1Threshold from solver.config (for createCharts.py MEC satisfaction plot). */
+	/**
+	 * Returns mon1Threshold from solver.config (for createCharts.py MEC
+	 * satisfaction plot).
+	 */
 	public double getMon1Threshold() {
 		return mon1Threshold;
 	}
 
-	/** Returns mon2Threshold from solver.config (for createCharts.py RPL satisfaction plot). */
+	/**
+	 * Returns mon2Threshold from solver.config (for createCharts.py RPL
+	 * satisfaction plot).
+	 */
 	public double getMon2Threshold() {
 		return mon2Threshold;
 	}
 
-	/** Returns mon3Threshold from solver.config (for createCharts.py RPL satisfaction plot). */
+	/**
+	 * Returns mon3Threshold from solver.config (for createCharts.py RPL
+	 * satisfaction plot).
+	 */
 	public double getMon3Threshold() {
 		return mon3Threshold;
 	}
@@ -99,7 +114,10 @@ public class RDMSim_TAAS {
 		return value.trim();
 	}
 
-	/** Optional property with default; used for experiment parameters (runSeed, surpriseMeasureForGamma, p_c). */
+	/**
+	 * Optional property with default; used for experiment parameters (runSeed,
+	 * surpriseMeasureForGamma, p_c).
+	 */
 	private String getProperty(Properties properties, String key, String defaultValue) {
 		String value = properties.getProperty(key);
 		if (value == null || value.trim().isEmpty()) {
@@ -107,9 +125,10 @@ public class RDMSim_TAAS {
 		}
 		return value.trim();
 	}
-	
+
 	/**
-	 * Find the solver.config file path, handling both IDE and command-line execution.
+	 * Find the solver.config file path, handling both IDE and command-line
+	 * execution.
 	 * If -DconfigPath=<path> is set, that path is used (for experiment runners).
 	 */
 	private String findConfigFile() {
@@ -125,18 +144,20 @@ public class RDMSim_TAAS {
 		if (configFile.exists()) {
 			return configFile.getPath();
 		}
-		
-		/* Try L4Project/src/solver.config (when running from workspace root)
-		configFile = new File("/src/solver.config");
-		if (configFile.exists()) {
-			return configFile.getPath();
-		}*/
-		
+
+		/*
+		 * Try L4Project/src/solver.config (when running from workspace root)
+		 * configFile = new File("/src/solver.config");
+		 * if (configFile.exists()) {
+		 * return configFile.getPath();
+		 * }
+		 */
+
 		// Try using class location (works when running from JAR or compiled classes)
 		try {
 			String path = RDMSim_TAAS.class.getProtectionDomain().getCodeSource().getLocation().getPath();
 			String decodedPath = URLDecoder.decode(path, "UTF-8");
-			
+
 			if (decodedPath.endsWith(".jar")) {
 				// Running from JAR - config should be in same directory or src/
 				int endIndex = decodedPath.lastIndexOf("/");
@@ -158,52 +179,57 @@ public class RDMSim_TAAS {
 		} catch (Exception e) {
 			// Fall through to default
 		}
-		
+
 		// Default fallback
 		return "src/solver.config";
 	}
 
 	/**
-	 * Read the solver.config file. It creates a properties object and it initialises
+	 * Read the solver.config file. It creates a properties object and it
+	 * initialises
 	 */
 	private void readConfigFile() {
 		this.sp = new SolverProperties();
-		
+
 		Properties properties = new Properties();
-		
-		// Find config file relative to the class location (works from both IDE and command line)
+
+		// Find config file relative to the class location (works from both IDE and
+		// command line)
 		String configPath = findConfigFile();
-		
+
 		try {
 			FileInputStream file = new FileInputStream(configPath);
 			properties.load(file);
 			file.close();
 		} catch (FileNotFoundException e) {
 			log.error("Could not find solver.config at: {}; cwd={}", configPath, System.getProperty("user.dir"));
-			throw new RuntimeException("solver.config file not found. Please ensure it exists in the src/ directory.", e);
+			throw new RuntimeException("solver.config file not found. Please ensure it exists in the src/ directory.",
+					e);
 		} catch (IOException e) {
 			e.printStackTrace();
 			throw new RuntimeException("Error reading solver.config file", e);
 		}
-		
+
 		// Validate that properties were loaded
 		if (properties.isEmpty()) {
 			throw new RuntimeException("solver.config file is empty or could not be read");
 		}
-		
+
 		// Exact Algorithm Settings
 		sp.setEpsilon(Double.parseDouble(getPropertyOrThrow(properties, "epsilon")));
 
-		// Directories (optional JVM override -DoutputDirectory=... for experiment runners)
+		// Directories (optional JVM override -DoutputDirectory=... for experiment
+		// runners)
 		String outputDirFromConfig = getPropertyOrThrow(properties, "outputDirectory");
 		String outputDirOverride = System.getProperty("outputDirectory");
-		sp.setOutputDirName(outputDirOverride != null && !outputDirOverride.trim().isEmpty() ? outputDirOverride.trim() : outputDirFromConfig);
+		sp.setOutputDirName(outputDirOverride != null && !outputDirOverride.trim().isEmpty() ? outputDirOverride.trim()
+				: outputDirFromConfig);
 		this.domainDirName = getPropertyOrThrow(properties, "domainDirectory");
-		
+
 		// Approximate Algorithm Settings
 		sp.setBeliefSamplingRuns(Integer.parseInt(getPropertyOrThrow(properties, "beliefSamplingRuns")));
 		sp.setBeliefSamplingSteps(Integer.parseInt(getPropertyOrThrow(properties, "beliefSamplingSteps")));
-		
+
 		// General Settings
 		String algorithmType = getPropertyOrThrow(properties, "algorithmType");
 		String lambda = getPropertyOrThrow(properties, "lambda");
@@ -216,14 +242,16 @@ public class RDMSim_TAAS {
 		this.surpriseMeasureForGamma = getProperty(properties, "surpriseMeasureForGamma", "MIP");
 		this.p_c = Double.parseDouble(getProperty(properties, "p_c", "0.5"));
 		if (this.surpriseMeasureForGamma != null && !this.surpriseMeasureForGamma.matches("CC|BF|MIP")) {
-			throw new RuntimeException("surpriseMeasureForGamma must be CC, BF, or MIP; got '" + this.surpriseMeasureForGamma + "'");
+			throw new RuntimeException(
+					"surpriseMeasureForGamma must be CC, BF, or MIP; got '" + this.surpriseMeasureForGamma + "'");
 		}
 		if (this.p_c <= 0 || this.p_c >= 1) {
 			throw new RuntimeException("p_c must be in (0, 1); got " + this.p_c);
 		}
 		String useSurpriseUpdatingStr = getProperty(properties, "useSurpriseUpdating", "true");
 		if (!useSurpriseUpdatingStr.equals("true") && !useSurpriseUpdatingStr.equals("false")) {
-			throw new RuntimeException("useSurpriseUpdating must be true or false; got '" + useSurpriseUpdatingStr + "'");
+			throw new RuntimeException(
+					"useSurpriseUpdating must be true or false; got '" + useSurpriseUpdatingStr + "'");
 		}
 		this.useSurpriseUpdating = useSurpriseUpdatingStr.equals("true");
 		this.lookback = Integer.parseInt(getProperty(properties, "lookback", "5"));
@@ -233,29 +261,33 @@ public class RDMSim_TAAS {
 
 		// Optional link failure injection
 		/*
-		String linkFailureTimestepStr = getProperty(properties, "linkFailureTimestep", "");
-		if (linkFailureTimestepStr != null && !linkFailureTimestepStr.trim().isEmpty()) {
-			this.linkFailureTimestep = Integer.parseInt(linkFailureTimestepStr.trim());
-			String linkFailureLinksStr = getProperty(properties, "linkFailureLinks", "");
-			if (linkFailureLinksStr != null && !linkFailureLinksStr.trim().isEmpty()) {
-				this.linkFailureLinksList = new ArrayList<>();
-				for (String pair : linkFailureLinksStr.split(",")) {
-					String[] parts = pair.trim().split("-");
-					if (parts.length == 2) {
-						this.linkFailureLinksList.add(new int[] {
-							Integer.parseInt(parts[0].trim()),
-							Integer.parseInt(parts[1].trim())
-						});
-					}
-				}
-			}
-			String linkRecoveryTimestepStr = getProperty(properties, "linkRecoveryTimestep", "");
-			if (linkRecoveryTimestepStr != null && !linkRecoveryTimestepStr.trim().isEmpty()) {
-				this.linkRecoveryTimestep = Integer.parseInt(linkRecoveryTimestepStr.trim());
-			}
-		}
-		*/
-		
+		 * String linkFailureTimestepStr = getProperty(properties,
+		 * "linkFailureTimestep", "");
+		 * if (linkFailureTimestepStr != null &&
+		 * !linkFailureTimestepStr.trim().isEmpty()) {
+		 * this.linkFailureTimestep = Integer.parseInt(linkFailureTimestepStr.trim());
+		 * String linkFailureLinksStr = getProperty(properties, "linkFailureLinks", "");
+		 * if (linkFailureLinksStr != null && !linkFailureLinksStr.trim().isEmpty()) {
+		 * this.linkFailureLinksList = new ArrayList<>();
+		 * for (String pair : linkFailureLinksStr.split(",")) {
+		 * String[] parts = pair.trim().split("-");
+		 * if (parts.length == 2) {
+		 * this.linkFailureLinksList.add(new int[] {
+		 * Integer.parseInt(parts[0].trim()),
+		 * Integer.parseInt(parts[1].trim())
+		 * });
+		 * }
+		 * }
+		 * }
+		 * String linkRecoveryTimestepStr = getProperty(properties,
+		 * "linkRecoveryTimestep", "");
+		 * if (linkRecoveryTimestepStr != null &&
+		 * !linkRecoveryTimestepStr.trim().isEmpty()) {
+		 * this.linkRecoveryTimestep = Integer.parseInt(linkRecoveryTimestepStr.trim());
+		 * }
+		 * }
+		 */
+
 		// Optional NFR thresholds for state discretisation (CHANGE DEFAULT VALUES HERE)
 		String mon1ThresholdStr = getProperty(properties, "mon1Threshold", "20");
 		String mon2ThresholdStr = getProperty(properties, "mon2Threshold", "20");
@@ -275,31 +307,34 @@ public class RDMSim_TAAS {
 		}
 
 		// Error checking solver.config parameters
-		if(!algorithmType.equals("perseus") && !algorithmType.equals("gip") && !algorithmType.equals("erpbvi") && !algorithmType.equals("erperseus")) {
+		if (!algorithmType.equals("perseus") && !algorithmType.equals("gip") && !algorithmType.equals("erpbvi")
+				&& !algorithmType.equals("erperseus")) {
 			throw new RuntimeException("Unexpected algorithm type in properties file");
 		}
-		
+
 		String dumpPolicyGraphStr = getPropertyOrThrow(properties, "dumpPolicyGraph");
-		if(!dumpPolicyGraphStr.equals("true") && !dumpPolicyGraphStr.equals("false")) {
+		if (!dumpPolicyGraphStr.equals("true") && !dumpPolicyGraphStr.equals("false")) {
 			throw new RuntimeException("Policy graph property must be either true or false");
-		}
-		else {
+		} else {
 			sp.setDumpPolicyGraph(dumpPolicyGraphStr.equals("true") && algorithmType.equals("gip"));
 		}
-		
+
 		String dumpActionLabelsStr = getPropertyOrThrow(properties, "dumpActionLabels");
-		if(!dumpActionLabelsStr.equals("true") && !dumpActionLabelsStr.equals("false")) {
+		if (!dumpActionLabelsStr.equals("true") && !dumpActionLabelsStr.equals("false")) {
 			throw new RuntimeException("Action label property must be either true or false");
-		}
-		else {
+		} else {
 			sp.setDumpActionLabels(dumpActionLabelsStr.equals("true"));
 		}
-		
-		log.info("Solver parameters: epsilon={}, valueFunctionTolerance={}, timeLimit={}, beliefSamplingRuns={}, beliefSamplingSteps={}, lambda={}",
-			sp.getEpsilon(), sp.getValueFunctionTolerance(), sp.getTimeLimit(), sp.getBeliefSamplingRuns(), sp.getBeliefSamplingSteps(), sp.getLambda());
-		log.info("Experiment: runSeed={}, surpriseMeasure={}, p_c={}, useSurpriseUpdating={}, lookback={}, mon1Threshold={}, mon2Threshold={}, mon3Threshold",
-			runSeed, surpriseMeasureForGamma, p_c, useSurpriseUpdating, lookback, mon1Threshold, mon2Threshold, mon3Threshold);
-		
+
+		log.info(
+				"Solver parameters: epsilon={}, valueFunctionTolerance={}, timeLimit={}, beliefSamplingRuns={}, beliefSamplingSteps={}, lambda={}",
+				sp.getEpsilon(), sp.getValueFunctionTolerance(), sp.getTimeLimit(), sp.getBeliefSamplingRuns(),
+				sp.getBeliefSamplingSteps(), sp.getLambda());
+		log.info(
+				"Experiment: runSeed={}, surpriseMeasure={}, p_c={}, useSurpriseUpdating={}, lookback={}, mon1Threshold={}, mon2Threshold={}, mon3Threshold",
+				runSeed, surpriseMeasureForGamma, p_c, useSurpriseUpdating, lookback, mon1Threshold, mon2Threshold,
+				mon3Threshold);
+
 		// load required POMDP algorithm (use runSeed for reproducible experiments)
 		switch (algorithmType) {
 			case "gip":
@@ -320,18 +355,19 @@ public class RDMSim_TAAS {
 			default:
 				throw new RuntimeException("Unexpected algorithm type in properties file");
 		}
-		
+
 		log.info("Algorithm: {}", algorithmType);
 	}
 
 	/**
-	 * Find the domain directory by searching from current directory up to project root
+	 * Find the domain directory by searching from current directory up to project
+	 * root
 	 */
 	private File findDomainDirectory(File startDir, String domainDirName) {
 		File current = startDir;
 		int maxDepth = 5; // Prevent infinite loops
 		int depth = 0;
-		
+
 		while (current != null && depth < maxDepth) {
 			File domainDir = new File(current, domainDirName);
 			if (domainDir.exists() && domainDir.isDirectory()) {
@@ -350,12 +386,13 @@ public class RDMSim_TAAS {
 		}
 		return null;
 	}
-	
+
 	/**
-	 * Checks if the desired domain and output directories exist, and it sets the full path to these directories.
+	 * Checks if the desired domain and output directories exist, and it sets the
+	 * full path to these directories.
 	 */
 	private void configureDirectories() {
-		String path = SolvePOMDP.class.getProtectionDomain().getCodeSource().getLocation().getPath();
+		String path = RDMSim_TAAS.class.getProtectionDomain().getCodeSource().getLocation().getPath();
 		String decodedPath = "";
 		try {
 			decodedPath = URLDecoder.decode(path, "UTF-8");
@@ -363,20 +400,20 @@ public class RDMSim_TAAS {
 			log.error("Failed to decode path", e);
 		}
 		log.debug("Code source path: {}", decodedPath);
-		
-		if(decodedPath.endsWith(".jar")) {
-			// solver has been started from jar, so we assume that output exists in the same directory as the jar file			
+
+		if (decodedPath.endsWith(".jar")) {
+			// solver has been started from jar, so we assume that output exists in the same
+			// directory as the jar file
 			int endIndex = decodedPath.lastIndexOf("/");
 			String workingDir = decodedPath.substring(0, endIndex);
 			sp.setWorkingDir(workingDir);
-			domainDir = workingDir+"/"+domainDirName;
-		}
-		else {
+			domainDir = workingDir + "/" + domainDirName;
+		} else {
 			// solver has not been started from jar
 			// Try to find the project root by looking for common project directories
 			File currentDir = new File(System.getProperty("user.dir"));
 			File domainDirFile = findDomainDirectory(currentDir, domainDirName);
-			
+
 			if (domainDirFile != null && domainDirFile.exists()) {
 				domainDir = domainDirFile.getAbsolutePath();
 				sp.setWorkingDir(domainDirFile.getParent());
@@ -385,26 +422,24 @@ public class RDMSim_TAAS {
 				sp.setWorkingDir("");
 				domainDir = domainDirName;
 			}
-		}	
+		}
 
 		File dir = new File(sp.getOutputDir());
-		if(!dir.exists()) {
-		    boolean created = dir.mkdirs();
-		    if (!created) {
-		        throw new RuntimeException("Output directory could not be created");
-		    }
+		if (!dir.exists()) {
+			boolean created = dir.mkdirs();
+			if (!created) {
+				throw new RuntimeException("Output directory could not be created");
+			}
+		} else if (!dir.isDirectory()) {
+			throw new RuntimeException("Output path exists but is not a directory");
 		}
-		else if(!dir.isDirectory()) {
-		    throw new RuntimeException("Output path exists but is not a directory");
-		}
-		
+
 		log.info("Output directory: {}; Domain directory: {}", sp.getOutputDir(), domainDir);
 	}
 
-
-
 	/**
 	 * Method to run experiments for RDMSim case using POMDP
+	 * 
 	 * @param pomdpFileName
 	 */
 	public void runCaseRDM(String pomdpFileName) {
@@ -412,30 +447,192 @@ public class RDMSim_TAAS {
 			// Use configured output directory instead of hardcoded path
 			String outputDir = sp.getOutputDir();
 
+			// Results Regression
+			FileWriter fw_mc_regr = new FileWriter("MCRegressionResultsSolvePOMDP.txt");
+			PrintWriter pw_mc_regr = new PrintWriter(fw_mc_regr);
+			FileWriter fw_mr_regr = new FileWriter("MRRegressionResultsSolvePOMDP.txt");
+			PrintWriter pw_mr_regr = new PrintWriter(fw_mr_regr);
+			FileWriter fw_mp_regr = new FileWriter("MPRegressionResultsSolvePOMDP.txt");
+			PrintWriter pw_mp_regr = new PrintWriter(fw_mp_regr);
+
 			// read POMDP file
 			File pomdpFile = new File(domainDir, pomdpFileName);
 			if (!pomdpFile.exists()) {
-				throw new RuntimeException("POMDP file not found: " + pomdpFile.getAbsolutePath() + 
-					"\nDomain directory: " + domainDir + 
-					"\nCurrent working directory: " + System.getProperty("user.dir"));
+				throw new RuntimeException("POMDP file not found: " + pomdpFile.getAbsolutePath() +
+						"\nDomain directory: " + domainDir +
+						"\nCurrent working directory: " + System.getProperty("user.dir"));
 			}
-			POMDP pomdp = PomdpParser.readPOMDP(pomdpFile.getAbsolutePath());
+			POMDP rdmPOMDP = PomdpParser.readPOMDP(pomdpFile.getAbsolutePath());
+
+			// Here we should set the defined thresholds for the POMDP MON1-MON3
+			//
+
+			int mst_cnt = 0, rt_cnt = 0;
+			RDMSimConnector rdmConnector = new RDMSimConnector();
+			RDMTransitionProb rdmTransProbs = new RDMTransitionProb();
+
+			// Get pre-defined scenario and its corresponding initial transitionFunction
+			int currentscenario_case = RDMSimConnector.network_management.simulation_properties.getUncertaintyScenario()
+					.getCurrentScenario();
+
+			if (currentscenario_case == 0) {
+				rdmPOMDP.transitionFunction = RDMTransitionProb.getTransitionFunction();
+			} else {
+				rdmPOMDP.transitionFunction = RDMTransitionProb.getTransitionFunctionCase(currentscenario_case);
+			}
+
+			RDMSimConnector.p = rdmPOMDP;
+
+			// Beginning of MAPE-K loop
+			for (RDMSimConnector.timestep = 0; RDMSimConnector.timestep < RDMSimConnector.network_management.simulation_properties
+					.getSimulationRuns(); RDMSimConnector.timestep++) {
+
+				// I really don't know what this `todeviate` stuff is about... The docs don't
+				// explain it
+				int todeviate = 2;
+				System.out.println(todeviate);
+
+				if (todeviate == 2) {
+					// RDMTransitionProb.deviation_timesteps = (int)(Math.random() *
+					// (RDMConfigurationConnected.deviation_timesteps_max-
+					// RDMConfigurationConnected.deviation_timesteps_min + 1) +
+					// RDMConfigurationConnected.deviation_timesteps_min);
+
+					RDMTransitionProb.random_int = (int) (Math.random() * (12 - 9 + 1) + 9);
+					// System.out.println("Random Number: "+RDMTransitionProb.random_int);
+					// timestepcounter=0;
+					///// For case 3
+					RDMTransitionProb.random_int1 = (int) (Math.random() * (12 - 9 + 1) + 9);
+					RDMTransitionProb.random_int2 = (int) (Math.random() * (12 - 9 + 1) + 9);
+
+				} else {
+					RDMTransitionProb.deviation_timesteps = 0;
+					RDMTransitionProb.random_int = 0;
+					// timestepcounter=0;
+
+					RDMTransitionProb.random_int1 = 0;
+					RDMTransitionProb.random_int2 = 0;
+					System.out.println("no deviation for this timestep");
+				}
+				
+				// update pomdp transition function according to the current scenario
+				if(currentscenario_case==0) {
+					rdmPOMDP.transitionFunction=RDMTransitionProb.getTransitionFunction();
+				} else {
+					rdmPOMDP.transitionFunction=RDMTransitionProb.getTransitionFunctionCase(currentscenario_case);
+				}
+				
+				RDMSimConnector.p=rdmPOMDP;
+
+
+				/*
+				* MONITOR
+				*/
+				RDMSimConnector.monitorables=RDMSimConnector.network_management.getMonitorables();
+
+				System.out.println("timestep: "+RDMSimConnector.timestep);
+				
+
+				/*
+				* ANALYSE
+				* Copmute belief state and satisfaction probabilites. 
+				* The baseline state is implicitly available from the previous simulation run
+				*/
+				int cs = rdmPOMDP.getInitialStateRDM(); // CHECK HERE
+				System.out.println("Initial state: "+cs);
+				rdmPOMDP.setCurrentState(cs);
+					
+				System.out.println("current state: "+ rdmPOMDP.getCurrentState());
+
+				// Get current belief over states (where each state represents the satisfaction combination for the NFRs)
+				BeliefPoint initialbelief=rdmPOMDP.getInitialBelief();
+				double b[]=initialbelief.getBelief();
+				System.out.println("Initial Belief: "+b[0]+" "+b[1]+" "+b[2]+" "+b[3]+" "+b[4]+" "+b[5]+" "+b[6]+" "+b[7]);
+				double mcsatprob=b[0]+b[1]+b[2]+b[3];
+				double mrsatprob=b[0]+b[1]+b[4]+b[5];
+				double mpsatprob=b[0]+b[2]+b[4]+b[6];
+				
+				////Results Log Regression////////
+				
+				pw_mc_regr.println(ResultsLog.bandwidthconsumption+","+mcsatprob+","+ResultsLog.satmc);
+				pw_mr_regr.println(ResultsLog.activelinks+","+mrsatprob+","+ResultsLog.satmr);
+
+
+				/*
+				* PLAN
+				* Solve the POMDP to determine the optimal adaptation action given the current belief state
+				* Each AlphaVector encodes a lienar function over beliefs
+				*/
+				ArrayList<AlphaVector> V1=solver.solve(rdmPOMDP);
+			 	System.out.println("Value size: "+V1.size()+"  Action label: "+ V1.get(0).getAction());
+
+				// select action using the relevant selected action-selection policy
+				int selectedAction;
+				if (solver instanceof ERPBVI) {
+					// ERPBVI has Q-functions directly available
+					erPolicy = new ERPolicy(rdmPOMDP, (ERPBVI)solver, new Random(runSeed));
+					selectedAction = erPolicy.selectAction(rdmPOMDP.getInitialBelief());
+				} else if (solver instanceof ERPerseus) {
+					// ERPerseus: extract Q-functions from value function
+					double lambda = ((ERPerseus) solver).getLambda();
+					erPolicy = new ERPolicy(rdmPOMDP, V1, lambda, new Random(runSeed));
+					selectedAction = erPolicy.selectAction(rdmPOMDP.getInitialBelief());
+				} else {
+					int bestIndex = AlphaVector.getBestVectorIndex(rdmPOMDP.getInitialBelief().getBelief(), V1);
+					selectedAction = V1.get(bestIndex).getAction();
+				}
+				log.debug("Selected action: {}", selectedAction);
+
+				/*
+				* EXECUTE
+				* Execute the selected action (changing topology)
+				* This also updates POMDP beliefs and transition probabilities
+				*/
+
+				// Check below is correct with index matching actions
+				if(selectedAction==0) {
+					mst_cnt++;
+				} else {
+					rt_cnt++;
+				}
+
+				rdmPOMDP.setInitialBelief(initialbelief);
+				RDMSimConnector.p = rdmPOMDP;
+
+				// Check Perform Action
+				rdmConnector.performAction(selectedAction);
+				rdmPOMDP = RDMSimConnector.p;
+				System.out.println("Current State: "+pomdp.getCurrentState());
+			
+			System.out.println("\nTopology Count:: MST: "+mst_cnt+" RT: "+rt_cnt);
+			}
+
+			pw_mc_regr.flush();
+			pw_mp_regr.flush();
+			pw_mr_regr.flush();
+			pw_mc_regr.close();
+			pw_mr_regr.close();
+			pw_mp_regr.close();
+		} catch (IOException ioex) {
+			log.error("IOException in runCaseIoT", ioex);
+		} catch (RuntimeException ex) {
+			log.error("Unexpected exception in runCaseIoT", ex);
 		}
 	}
 
-		/**
-		 * Solve a POMDP defined by a .POMDP file
-		 * 
-		 * @param pomdpFileName filename of a domain in the domain directory
-		 */
-		public void run(String pomdpFileName) {
-			if (pomdpFileName.equals("IoT.POMDP")) {
-				// This is where the original DeltaIoT implementation would have gone
-			}
-			if (pomdpFileName.equals("RDM.POMDP")) {
-				runCaseRDM(pomdpFileName); // RDMSim case
-			}
+	/**
+	 * Solve a POMDP defined by a .POMDP file
+	 * 
+	 * @param pomdpFileName filename of a domain in the domain directory
+	 */
+	public void run(String pomdpFileName) {
+		if (pomdpFileName.equals("IoT.POMDP")) {
+			// This is where the original DeltaIoT implementation would have gone
 		}
+		if (pomdpFileName.equals("RDM.POMDP")) {
+			runCaseRDM(pomdpFileName); // RDMSim case
+		}
+	}
 
 	/**
 	 * Main entry point for running the RDMSim POMDP simulation
@@ -453,28 +650,36 @@ public class RDMSim_TAAS {
 
 		// Step: 1 set the networkproperties and simulation properties by loading the
 		// simulation configuration
-		NetworkManagment nm = new NetworkManagment();
+		// NetworkManagment nm = new NetworkManagment();
 
 		// Step: 2 Instantiate the Probe and effector
-		Probe probe = nm.getProbe();
-		Effector effector = nm.getEffector();
+		// Probe probe = nm.getProbe();
+		// Effector effector = nm.getEffector();
 
 		// Step 3: Initialize the mape-K feedback loop using the Probe and effector
-		MAPE_KLoop loop = new MAPE_KLoop_init(probe, effector);
+		// MAPE_KLoop loop = new MAPE_KLoop_init(probe, effector);
 
 		// Initialise POMDP
-		SolvePOMDP pomdp = new SolvePOMDP();
+		RDMSim_TAAS pomdp = new RDMSim_TAAS();
 		pomdp.run("rdm.POMDP");
 
 		// Run simulation for the number of simulation runs defined to execute the
 		// feedback loop
-		for (int timestep = 0; timestep < nm.simulation_properties.getSimulationRuns(); timestep++) {
+		/*
+		 * for (int timestep = 0; timestep <
+		 * nm.simulation_properties.getSimulationRuns(); timestep++) {
+		 * 
+		 * // start the feedback loop
+		 * loop.run(timestep);
+		 * 
+		 * }
+		 * RDMSimulator.displayResults(args);
+		 */
 
-			// start the feedback loop
-			loop.run(timestep);
-
-		}
-		RDMSimulator.displayResults(args);
+		long endTime = System.currentTimeMillis();
+		long totalTime = endTime - startTime;
+		double totalTimeSeconds = totalTime / 1000.0;
+		log.info("Total execution time: {} seconds", String.format("%.2f", totalTimeSeconds));
 
 	}
 }
