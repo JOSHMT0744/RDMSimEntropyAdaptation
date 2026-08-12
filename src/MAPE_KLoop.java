@@ -13,7 +13,7 @@ public class MAPE_KLoop {
 	Probe probe;
 	Effector effector;
 	
-	public MAPE_KLoop(Probe Probe, Effector effector)
+	public MAPE_KLoop_init(Probe Probe, Effector effector)
 	{
 		this.probe=Probe;
 		this.effector=effector;
@@ -23,16 +23,16 @@ public class MAPE_KLoop {
 	public void monitor(int simulation_timestep)
 	{
 		//get monitorables method executes a single run and return the monitorables for the current simulation run
-		Monitorables m=probe.getMonitorables();
-		analysisAndPlanning(simulation_timestep, m);
+		Monitorables monitorables=probe.getMonitorables();
+		analysisAndPlanning(simulation_timestep, monitorables);
 	}
 	
 	//Analysis and planning for the adaptation
-	public void analysisAndPlanning(int simulation_timestep,Monitorables m)
+	public void analysisAndPlanning(int simulation_timestep, Monitorables monitorables)
 	{
 		String selected_topology;
 		
-		if (probe.getBandwidthConsumption()>m.getThresholdBandwidthConsumption()||probe.getTimeToWrite()>m.getThresholdTimeToWrite())
+		if (probe.getBandwidthConsumption() > monitorables.getThresholdBandwidthConsumption() || probe.getTimeToWrite() > monitorables.getThresholdTimeToWrite())
 		{
 			
 			int random_topology=(int)ThreadLocalRandom.current().nextDouble(0,TopologyList.topologies.size());
@@ -43,7 +43,7 @@ public class MAPE_KLoop {
 			
 			
 		}
-		else if(probe.getActiveLinks()>m.getThresholdActiveLinks())
+		else if(probe.getActiveLinks()>monitorables.getThresholdActiveLinks())
 		{
 			
 			int random_topology=(int)ThreadLocalRandom.current().nextDouble(0,TopologyList.topologies.size());

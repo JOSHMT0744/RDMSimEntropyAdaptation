@@ -1,0 +1,9 @@
+# Problem based on RDMSim Simulator
+
+discount: 0.9
+values: reward
+states: S1 S2
+actions: DTP ITP 
+# Transmission Power
+observations: SNR-L SNR-E SNR-G 
+# Signal-to-noise Ratio (low, expected, good)
