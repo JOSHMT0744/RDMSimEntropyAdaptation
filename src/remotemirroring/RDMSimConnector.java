@@ -8,6 +8,7 @@ import rdm.network.Monitorables;
 import solver.BeliefPoint;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.logging.log4j.LogManager;

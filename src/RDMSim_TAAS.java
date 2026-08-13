@@ -146,7 +146,7 @@ public class RDMSim_TAAS {
 		}
 
 		/*
-		 * Try L4Project/src/solver.config (when running from workspace root)
+		 * Try RDMSIM_TAAS/src/solver.config (when running from workspace root)
 		 * configFile = new File("/src/solver.config");
 		 * if (configFile.exists()) {
 		 * return configFile.getPath();
@@ -294,16 +294,16 @@ public class RDMSim_TAAS {
 		String mon3ThresholdStr = getProperty(properties, "mon3Threshold", "20");
 		this.mon1Threshold = Double.parseDouble(mon1ThresholdStr.trim());
 		this.mon2Threshold = Double.parseDouble(mon2ThresholdStr.trim());
-		this.mon3Threshold = Double.parseDouble(mon23ThresholdStr.trim());
+		this.mon3Threshold = Double.parseDouble(mon3ThresholdStr.trim());
 
 		if (this.mon1Threshold < 0 || this.mon1Threshold > 100) {
-			throw new RuntimeException("mecThreshold must be > 0; got " + this.mecThreshold);
+			throw new RuntimeException("mon1Threshold must be > 0; got " + this.mon1Threshold);
 		}
 		if (this.mon2Threshold < 0 || this.mon2Threshold >= 100) {
-			throw new RuntimeException("rplThreshold must be in (0, 1); got " + this.rplThreshold);
+			throw new RuntimeException("mon2Threshold must be in (0, 1); got " + this.mon2Threshold);
 		}
 		if (this.mon3Threshold < 0 || this.mon3Threshold >= 100) {
-			throw new RuntimeException("mon3Threshold must be in (0, 1); got " + this.rplThreshold);
+			throw new RuntimeException("mon3Threshold must be in (0, 1); got " + this.mon3Threshold);
 		}
 
 		// Error checking solver.config parameters
@@ -373,12 +373,12 @@ public class RDMSim_TAAS {
 			if (domainDir.exists() && domainDir.isDirectory()) {
 				return domainDir;
 			}
-			// Also check for L4Project/domains pattern
-			File l4ProjectDir = new File(current, "L4Project");
-			if (l4ProjectDir.exists() && l4ProjectDir.isDirectory()) {
-				File domainDirInL4 = new File(l4ProjectDir, domainDirName);
-				if (domainDirInL4.exists() && domainDirInL4.isDirectory()) {
-					return domainDirInL4;
+
+			File rootDir = new File(current, "/"); // Check here. Potentially instead of "/" put "RDMSIM_TAAS"
+			if (rootDir.exists() && rootDir.isDirectory()) {
+				File rootFile = new File(rootDir, domainDirName);
+				if (rootFile.exists() && rootFile.isDirectory()) {
+					return rootFile;
 				}
 			}
 			current = current.getParentFile();
@@ -444,6 +444,7 @@ public class RDMSim_TAAS {
 	 */
 	public void runCaseRDM(String pomdpFileName) {
 		try {
+			System.out.println("Running RDM case...");
 			// Use configured output directory instead of hardcoded path
 			String outputDir = sp.getOutputDir();
 
@@ -602,7 +603,7 @@ public class RDMSim_TAAS {
 				// Check Perform Action
 				rdmConnector.performAction(selectedAction);
 				rdmPOMDP = RDMSimConnector.p;
-				System.out.println("Current State: "+pomdp.getCurrentState());
+				System.out.println("Current State: "+rdmPOMDP.getCurrentState());
 			
 			System.out.println("\nTopology Count:: MST: "+mst_cnt+" RT: "+rt_cnt);
 			}
@@ -640,6 +641,7 @@ public class RDMSim_TAAS {
 	 * @param args first argument should be a filename of a .POMDP file
 	 */
 	public static void main(String args[]) {
+		System.out.println("Running RDMSim POMDP simulation...");
 		long startTime = System.currentTimeMillis();
 
 		log.info(
@@ -661,7 +663,7 @@ public class RDMSim_TAAS {
 
 		// Initialise POMDP
 		RDMSim_TAAS pomdp = new RDMSim_TAAS();
-		pomdp.run("rdm.POMDP");
+		pomdp.run("RDM.POMDP");
 
 		// Run simulation for the number of simulation runs defined to execute the
 		// feedback loop

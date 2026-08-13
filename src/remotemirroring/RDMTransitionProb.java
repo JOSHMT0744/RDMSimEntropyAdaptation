@@ -79,6 +79,11 @@ public class RDMTransitionProb {
 		
 	}
 	
+	/**
+	 * Method to get Transition probabilities for deterministic scenario
+	 * @param casenum
+	 * @return
+	 */
 	public static double[] getCaseMSTDet(int casenum)
 	{
 		/////change it to redundant topology

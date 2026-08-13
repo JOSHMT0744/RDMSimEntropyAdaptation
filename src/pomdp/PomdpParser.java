@@ -184,6 +184,11 @@ public class PomdpParser {
 						observationFunction[curAction][state][obs] = prob;
 					}
 					continue;
+					} else {
+						int curState = stateMap.get(curStateStr);
+						prob = Double.parseDouble(lines.get(lineIndex + 1).trim());
+						observationFunction[curAction][curState][obs] = prob;
+						continue;
 					}
 				}
 			

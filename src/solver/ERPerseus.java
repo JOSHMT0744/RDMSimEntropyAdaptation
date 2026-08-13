@@ -110,6 +110,7 @@ public class ERPerseus implements Solver {
 				for (int obs = 0; obs < pomdp.getNumObservations(); obs++) {
 					double prob = b.getActionObservationProbability(action, obs); // Probability for observation obs
 					if (prob > 1.0) prob = 1.0; // Clamp probability to [0,1]
+					if (prob < 0.0) prob = 0.0;
 					ps.addItem(obs, prob); // Add this observation with its probability
 				}
 

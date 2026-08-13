@@ -18,6 +18,7 @@
 
 package pomdp;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 
@@ -44,10 +45,9 @@ public class POMDP {
 	
 	private HashMap<Integer,String> actionLabels;
 	
-	public POMDP(String filename, int nStates, int nActions, int nObservations, double discountFactor, double[][] rewardFunction, double[][][] transitionFunction, double[][][] observationFunction, HashMap<Integer,String> actionLabels, BeliefPoint b0) {		
-		String[] filenameSplit = filename.split("/");
-		this.filename = filenameSplit[filenameSplit.length-1];
-		this.instanceName = filenameSplit[filenameSplit.length-1].replace(".POMDP", "");
+	public POMDP(String filename, int nStates, int nActions, int nObservations, double discountFactor, double[][] rewardFunction, double[][][] transitionFunction, double[][][] observationFunction, HashMap<Integer,String> actionLabels, BeliefPoint b0, double[][][] transitionBeliefReset, double[][][] transitionBeliefCurr, double[][][] observationBelief) {		
+		this.filename = new File(filename).getName();
+		this.instanceName = this.filename.replace(".POMDP", "");
 		this.nStates = nStates;
 		this.nActions = nActions;
 		this.nObservations = nObservations;
