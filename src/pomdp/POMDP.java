@@ -39,6 +39,12 @@ public class POMDP {
 	//Changed transitionFunction to public from private
 	public double[][][] transitionFunction;
 	private double[][][] observationFunction;
+
+	// Dirichlet pseudo-count beliefs over transitions/observations, used by
+	// RDMSimConnector's surprise (CC/BF/MIP) and SMiLe gamma calculations.
+	public double[][][] transitionBeliefCurr;
+	public double[][][] transitionBeliefReset;
+	public double[][][] observationBelief;
 	private double minReward = Double.POSITIVE_INFINITY;
 	
 	private BeliefPoint b0;
@@ -57,7 +63,10 @@ public class POMDP {
 		this.observationFunction = observationFunction;
 		this.actionLabels = actionLabels;
 		this.b0 = b0;
-		
+		this.transitionBeliefReset = transitionBeliefReset;
+		this.transitionBeliefCurr = transitionBeliefCurr;
+		this.observationBelief = observationBelief;
+
 		// compute min reward
 		for(int s=0; s<nStates; s++) {
 			for(int a=0; a<nActions; a++) {

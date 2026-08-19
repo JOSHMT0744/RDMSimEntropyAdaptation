@@ -1,5 +1,5 @@
 {
-  "time_steps": 100,
+  "time_steps": 1000,
   "mirror_number": 25,
 
   "link_threshold": 35,

@@ -19,6 +19,7 @@ import rdm.management.Effector;
 import rdm.management.NetworkManagment;
 import rdm.management.Probe;
 import rdm.management.RDMSimulator;
+import remotemirroring.OutputLogger;
 import remotemirroring.RDMSimConnector;
 import remotemirroring.RDMTransitionProb;
 import remotemirroring.ResultsLog;
@@ -69,6 +70,99 @@ public class RDMSim_TAAS {
 
 		// check if required directories exist
 		configureDirectories();
+	}
+
+	/**
+	 * Find Python executable in virtual environment
+	 */
+	private static String findPythonExecutable() {
+		// Try Windows path first
+		File venvWindows = new File(".venv/Scripts/python.exe");
+		if (venvWindows.exists()) {
+			return venvWindows.getPath();
+		}
+		
+		// Try Linux/Mac path
+		File venvUnix = new File(".venv/bin/python");
+		if (venvUnix.exists()) {
+			return venvUnix.getPath();
+		}
+		
+		// Try from L4Project directory
+		File venvL4Windows = new File("./.venv/Scripts/python.exe");
+		if (venvL4Windows.exists()) {
+			return venvL4Windows.getPath();
+		}
+		
+		File venvL4Unix = new File("./.venv/bin/python");
+		if (venvL4Unix.exists()) {
+			return venvL4Unix.getPath();
+		}
+		
+		return null;
+	}
+
+	/**
+	 * Find createCharts.py script
+	 */
+	private static String findChartsScript() {
+		File script = new File("createCharts.py");
+		if (script.exists()) {
+			return script.getPath();
+		}
+		
+		File scriptL4 = new File("./createCharts.py");
+		if (scriptL4.exists()) {
+			return scriptL4.getPath();
+		}
+		
+		return null;
+	}
+
+	/**
+	 * Run createCharts.py to generate graphs from the solver output.
+	 * @param outputDirForCharts Directory where the solver wrote output (MECSattimestep.txt, gamma.txt, etc.);
+	 *                           should match solver.config outputDirectory. Passed to createCharts.py as --output-dir.
+	 * @param mecThreshold MEC threshold from solver.config (--mec-threshold).
+	 * @param rplThreshold RPL threshold from solver.config (--rpl-threshold).
+	 */
+	public static void runPython(String outputDirForCharts, double mon1Threshold, double mon2Threshold, double mon3Threshold) throws Exception {
+		// Try to find Python executable in virtual environment
+		String pythonPath = findPythonExecutable();
+		if (pythonPath == null) {
+			log.warn("Python virtual environment not found. Skipping chart generation. Expected: .venv\\Scripts\\python.exe or .venv/bin/python");
+			return;
+		}
+		
+		// Find createCharts.py relative to project root
+		String chartsScript = findChartsScript();
+		if (chartsScript == null) {
+			log.warn("createCharts.py not found. Skipping chart generation.");
+			return;
+		}
+		
+		// Resolve output dir to absolute path so createCharts.py reads from the correct run directory (e.g. init_runs/s222)
+		String outputDirAbs = new File(outputDirForCharts).getAbsolutePath();
+		log.info("Running createCharts.py with --output-dir {} --mon1-threshold {} --mon2-threshold {} --mon3-threshold {}", outputDirAbs, mon1Threshold, mon2Threshold, mon3Threshold);
+		ProcessBuilder pb = new ProcessBuilder(
+			pythonPath, chartsScript,
+			"--output-dir", outputDirAbs,
+			"--mon1-threshold", String.valueOf(mon1Threshold),
+			"--mon2-threshold", String.valueOf(mon2Threshold),
+			"--mon3-threshold", String.valueOf(mon3Threshold)
+		);
+		pb.redirectErrorStream(true);
+		Process p = pb.start();
+		
+		BufferedReader reader = new BufferedReader(
+				new InputStreamReader(p.getInputStream())
+				);
+		
+		String line;
+		while ((line = reader.readLine()) != null) {
+			log.debug("PYTHON: {}", line);
+		}
+		p.waitFor();
 	}
 
 	/**
@@ -296,14 +390,14 @@ public class RDMSim_TAAS {
 		this.mon2Threshold = Double.parseDouble(mon2ThresholdStr.trim());
 		this.mon3Threshold = Double.parseDouble(mon3ThresholdStr.trim());
 
-		if (this.mon1Threshold < 0 || this.mon1Threshold > 100) {
-			throw new RuntimeException("mon1Threshold must be > 0; got " + this.mon1Threshold);
+		if (this.mon1Threshold < 0) {
+			throw new RuntimeException("mon1Threshold (active links) must be >= 0; got " + this.mon1Threshold);
 		}
-		if (this.mon2Threshold < 0 || this.mon2Threshold >= 100) {
-			throw new RuntimeException("mon2Threshold must be in (0, 1); got " + this.mon2Threshold);
+		if (this.mon2Threshold < 0) {
+			throw new RuntimeException("mon2Threshold (bandwidth consumption, GB/s) must be >= 0; got " + this.mon2Threshold);
 		}
-		if (this.mon3Threshold < 0 || this.mon3Threshold >= 100) {
-			throw new RuntimeException("mon3Threshold must be in (0, 1); got " + this.mon3Threshold);
+		if (this.mon3Threshold < 0) {
+			throw new RuntimeException("mon3Threshold (time to write, ms) must be >= 0; got " + this.mon3Threshold);
 		}
 
 		// Error checking solver.config parameters
@@ -337,23 +431,13 @@ public class RDMSim_TAAS {
 
 		// load required POMDP algorithm (use runSeed for reproducible experiments)
 		switch (algorithmType) {
-			case "gip":
-				throw new RuntimeException("GIP is not supported");
-			case "perseus":
-				this.solver = new Perseus(sp, new Random(runSeed));
-				break;
-			case "erperseus":
-				this.solver = new ERPerseus(sp, new Random(runSeed), sp.getLambda());
-				break;
-			case "fasterpbvi":
-				this.solver = new fastERPBVI(sp, new Random(runSeed), sp.getLambda(), false);
-				break;
-			case "erpbvi":
-				// Entropy-Regularized PBVI with default parameters
+			case "gip" -> throw new RuntimeException("GIP is not supported");
+			case "perseus" -> this.solver = new Perseus(sp, new Random(runSeed));
+			case "erperseus" -> this.solver = new ERPerseus(sp, new Random(runSeed), sp.getLambda());
+			case "fasterpbvi" -> this.solver = new fastERPBVI(sp, new Random(runSeed), sp.getLambda(), false);
+			case "erpbvi" -> // Entropy-Regularized PBVI with default parameters
 				this.solver = new ERPBVI(sp, new Random(runSeed), sp.getLambda(), false);
-				break;
-			default:
-				throw new RuntimeException("Unexpected algorithm type in properties file");
+			default -> throw new RuntimeException("Unexpected algorithm type in properties file");
 		}
 
 		log.info("Algorithm: {}", algorithmType);
@@ -449,11 +533,11 @@ public class RDMSim_TAAS {
 			String outputDir = sp.getOutputDir();
 
 			// Results Regression
-			FileWriter fw_mc_regr = new FileWriter("MCRegressionResultsSolvePOMDP.txt");
+			FileWriter fw_mc_regr = new FileWriter(new File(outputDir,"MCRegressionResultsSolvePOMDP.txt"));
 			PrintWriter pw_mc_regr = new PrintWriter(fw_mc_regr);
-			FileWriter fw_mr_regr = new FileWriter("MRRegressionResultsSolvePOMDP.txt");
+			FileWriter fw_mr_regr = new FileWriter(new File(outputDir,"MRRegressionResultsSolvePOMDP.txt"));
 			PrintWriter pw_mr_regr = new PrintWriter(fw_mr_regr);
-			FileWriter fw_mp_regr = new FileWriter("MPRegressionResultsSolvePOMDP.txt");
+			FileWriter fw_mp_regr = new FileWriter(new File(outputDir,"MPRegressionResultsSolvePOMDP.txt"));
 			PrintWriter pw_mp_regr = new PrintWriter(fw_mp_regr);
 
 			// read POMDP file
@@ -465,12 +549,34 @@ public class RDMSim_TAAS {
 			}
 			POMDP rdmPOMDP = PomdpParser.readPOMDP(pomdpFile.getAbsolutePath());
 
-			// Here we should set the defined thresholds for the POMDP MON1-MON3
-			//
-
 			int mst_cnt = 0, rt_cnt = 0;
 			RDMSimConnector rdmConnector = new RDMSimConnector();
 			RDMTransitionProb rdmTransProbs = new RDMTransitionProb();
+
+			// Push the config-driven NFR thresholds into the RDMSim jar's Monitorables
+			// object, which POMDP.getInitialStateRDM() reads from when computing MON1-MON3
+			// satisfaction. MON1=active_links, MON2=bandwidth_consumption, MON3=time_to_write.
+			RDMSimConnector.network_management.network_properties.m.setThresholdActiveLinks(mon1Threshold);
+			RDMSimConnector.network_management.network_properties.m.setThresholdBandwidthConsumption(mon2Threshold);
+			RDMSimConnector.network_management.network_properties.m.setThresholdTimeToWrite(mon3Threshold);
+
+			// Wire the experiment parameters read from solver.config into the connector
+			rdmConnector.setOutputDirectory(outputDir);
+			rdmConnector.setSurpriseMeasureForGamma(surpriseMeasureForGamma);
+			rdmConnector.setP_c(p_c);
+			rdmConnector.setLookback(lookback);
+			rdmConnector.setUseSurpriseUpdating(useSurpriseUpdating);
+
+			// Set up monitorable logging: truncate any stale files from a previous run
+			OutputLogger outputLogger = new OutputLogger(outputDir);
+			String[] logFiles = { "monitorables.txt", "MON1Sat.txt", "MON1SatProb.txt", "MON2Sat.txt",
+					"MON2SatProb.txt", "MON3Sat.txt", "MON3SatProb.txt", "SelectedAction.txt",
+					"state_transitions.txt", "surpriseBF.txt", "surpriseCC.txt", "surpriseMIP.txt",
+					"gamma.txt", "MIPBounds.txt" };
+			for (String f : logFiles) {
+				outputLogger.clearFile(f);
+			}
+			outputLogger.writeMonitorablesHeader();
 
 			// Get pre-defined scenario and its corresponding initial transitionFunction
 			int currentscenario_case = RDMSimConnector.network_management.simulation_properties.getUncertaintyScenario()
@@ -531,6 +637,15 @@ public class RDMSim_TAAS {
 				*/
 				RDMSimConnector.monitorables=RDMSimConnector.network_management.getMonitorables();
 
+				outputLogger.appendRow("monitorables.txt", RDMSimConnector.timestep,
+						RDMSimConnector.monitorables.getActiveLinks(),
+						RDMSimConnector.monitorables.getBandwidthConsumption(),
+						RDMSimConnector.monitorables.getTimeToWrite(),
+						RDMSimConnector.monitorables.getAlpha(),
+						RDMSimConnector.monitorables.getThresholdActiveLinks(),
+						RDMSimConnector.monitorables.getThresholdBandwidthConsumption(),
+						RDMSimConnector.monitorables.getThresholdTimeToWrite());
+
 				System.out.println("timestep: "+RDMSimConnector.timestep);
 				
 
@@ -557,6 +672,15 @@ public class RDMSim_TAAS {
 				
 				pw_mc_regr.println(ResultsLog.bandwidthconsumption+","+mcsatprob+","+ResultsLog.satmc);
 				pw_mr_regr.println(ResultsLog.activelinks+","+mrsatprob+","+ResultsLog.satmr);
+				pw_mp_regr.println(ResultsLog.timetowrite+","+mpsatprob+","+ResultsLog.satmp);
+
+				// MON1 = active links, MON2 = bandwidth consumption, MON3 = time to write
+				outputLogger.appendRow("MON1Sat.txt", RDMSimConnector.timestep, ResultsLog.activelinks);
+				outputLogger.appendRow("MON1SatProb.txt", RDMSimConnector.timestep, mrsatprob);
+				outputLogger.appendRow("MON2Sat.txt", RDMSimConnector.timestep, ResultsLog.bandwidthconsumption);
+				outputLogger.appendRow("MON2SatProb.txt", RDMSimConnector.timestep, mcsatprob);
+				outputLogger.appendRow("MON3Sat.txt", RDMSimConnector.timestep, ResultsLog.timetowrite);
+				outputLogger.appendRow("MON3SatProb.txt", RDMSimConnector.timestep, mpsatprob);
 
 
 				/*
@@ -583,6 +707,7 @@ public class RDMSim_TAAS {
 					selectedAction = V1.get(bestIndex).getAction();
 				}
 				log.debug("Selected action: {}", selectedAction);
+				outputLogger.appendRow("SelectedAction.txt", RDMSimConnector.timestep, selectedAction);
 
 				/*
 				* EXECUTE
@@ -604,6 +729,9 @@ public class RDMSim_TAAS {
 				rdmConnector.performAction(selectedAction);
 				rdmPOMDP = RDMSimConnector.p;
 				System.out.println("Current State: "+rdmPOMDP.getCurrentState());
+
+				outputLogger.appendRow("state_transitions.txt", RDMSimConnector.timestep, cs, selectedAction,
+						rdmPOMDP.getCurrentState(), b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
 			
 			System.out.println("\nTopology Count:: MST: "+mst_cnt+" RT: "+rt_cnt);
 			}
@@ -614,6 +742,12 @@ public class RDMSim_TAAS {
 			pw_mc_regr.close();
 			pw_mr_regr.close();
 			pw_mp_regr.close();
+
+			try {
+				runPython(outputDir, mon1Threshold, mon2Threshold, mon3Threshold);
+			} catch (Exception chartEx) {
+				log.warn("Chart generation failed: {}", chartEx.getMessage());
+			}
 		} catch (IOException ioex) {
 			log.error("IOException in runCaseIoT", ioex);
 		} catch (RuntimeException ex) {
