@@ -19,6 +19,7 @@ import rdm.management.Effector;
 import rdm.management.NetworkManagment;
 import rdm.management.Probe;
 import rdm.management.RDMSimulator;
+import rdm.network.Monitorables;
 import remotemirroring.OutputLogger;
 import remotemirroring.RDMSimConnector;
 import remotemirroring.RDMTransitionProb;
@@ -60,9 +61,15 @@ public class RDMSim_TAAS {
 	private boolean useSurpriseUpdating = true;
 	private int lookback = 5;
 
-	private double mon1Threshold = 20.0;
-	private double mon2Threshold = 20.0;
-	private double mon3Threshold = 20.0;
+	/**
+	 * NFR satisfaction thresholds, in absolute units. These are NOT read from
+	 * solver.config: they are derived by RDMSim from the percentages in
+	 * config_log_files/configuration.json and read back in runCaseRDM().
+	 * Left at 0 until then so a failed read-back is detectable.
+	 */
+	private double mon1Threshold = 0.0;
+	private double mon2Threshold = 0.0;
+	private double mon3Threshold = 0.0;
 
 	public RDMSim_TAAS() {
 		// read paramters from config file
@@ -174,24 +181,27 @@ public class RDMSim_TAAS {
 	}
 
 	/**
-	 * Returns mon1Threshold from solver.config (for createCharts.py MEC
-	 * satisfaction plot).
+	 * Returns the MON1 (active links) threshold in absolute units, as derived by
+	 * RDMSim from link_threshold in config_log_files/configuration.json. Only
+	 * populated once runCaseRDM() has read it back from the simulator.
 	 */
 	public double getMon1Threshold() {
 		return mon1Threshold;
 	}
 
 	/**
-	 * Returns mon2Threshold from solver.config (for createCharts.py RPL
-	 * satisfaction plot).
+	 * Returns the MON2 (bandwidth consumption, Gbps) threshold in absolute units,
+	 * as derived by RDMSim from bandwidth_threshold in
+	 * config_log_files/configuration.json.
 	 */
 	public double getMon2Threshold() {
 		return mon2Threshold;
 	}
 
 	/**
-	 * Returns mon3Threshold from solver.config (for createCharts.py RPL
-	 * satisfaction plot).
+	 * Returns the MON3 (time to write, ms) threshold in absolute units, as derived
+	 * by RDMSim from writing_times_threshold in
+	 * config_log_files/configuration.json.
 	 */
 	public double getMon3Threshold() {
 		return mon3Threshold;
@@ -382,23 +392,9 @@ public class RDMSim_TAAS {
 		 * }
 		 */
 
-		// Optional NFR thresholds for state discretisation (CHANGE DEFAULT VALUES HERE)
-		String mon1ThresholdStr = getProperty(properties, "mon1Threshold", "20");
-		String mon2ThresholdStr = getProperty(properties, "mon2Threshold", "20");
-		String mon3ThresholdStr = getProperty(properties, "mon3Threshold", "20");
-		this.mon1Threshold = Double.parseDouble(mon1ThresholdStr.trim());
-		this.mon2Threshold = Double.parseDouble(mon2ThresholdStr.trim());
-		this.mon3Threshold = Double.parseDouble(mon3ThresholdStr.trim());
-
-		if (this.mon1Threshold < 0) {
-			throw new RuntimeException("mon1Threshold (active links) must be >= 0; got " + this.mon1Threshold);
-		}
-		if (this.mon2Threshold < 0) {
-			throw new RuntimeException("mon2Threshold (bandwidth consumption, GB/s) must be >= 0; got " + this.mon2Threshold);
-		}
-		if (this.mon3Threshold < 0) {
-			throw new RuntimeException("mon3Threshold (time to write, ms) must be >= 0; got " + this.mon3Threshold);
-		}
+		// NFR thresholds are not read here: config_log_files/configuration.json is the
+		// single source of truth, and runCaseRDM() reads the absolute values back out of
+		// RDMSim once the simulator has been constructed.
 
 		// Error checking solver.config parameters
 		if (!algorithmType.equals("perseus") && !algorithmType.equals("gip") && !algorithmType.equals("erpbvi")
@@ -425,9 +421,8 @@ public class RDMSim_TAAS {
 				sp.getEpsilon(), sp.getValueFunctionTolerance(), sp.getTimeLimit(), sp.getBeliefSamplingRuns(),
 				sp.getBeliefSamplingSteps(), sp.getLambda());
 		log.info(
-				"Experiment: runSeed={}, surpriseMeasure={}, p_c={}, useSurpriseUpdating={}, lookback={}, mon1Threshold={}, mon2Threshold={}, mon3Threshold",
-				runSeed, surpriseMeasureForGamma, p_c, useSurpriseUpdating, lookback, mon1Threshold, mon2Threshold,
-				mon3Threshold);
+				"Experiment: runSeed={}, surpriseMeasure={}, p_c={}, useSurpriseUpdating={}, lookback={}",
+				runSeed, surpriseMeasureForGamma, p_c, useSurpriseUpdating, lookback);
 
 		// load required POMDP algorithm (use runSeed for reproducible experiments)
 		switch (algorithmType) {
@@ -553,12 +548,31 @@ public class RDMSim_TAAS {
 			RDMSimConnector rdmConnector = new RDMSimConnector();
 			RDMTransitionProb rdmTransProbs = new RDMTransitionProb();
 
-			// Push the config-driven NFR thresholds into the RDMSim jar's Monitorables
-			// object, which POMDP.getInitialStateRDM() reads from when computing MON1-MON3
-			// satisfaction. MON1=active_links, MON2=bandwidth_consumption, MON3=time_to_write.
-			RDMSimConnector.network_management.network_properties.m.setThresholdActiveLinks(mon1Threshold);
-			RDMSimConnector.network_management.network_properties.m.setThresholdBandwidthConsumption(mon2Threshold);
-			RDMSimConnector.network_management.network_properties.m.setThresholdTimeToWrite(mon3Threshold);
+			// config_log_files/configuration.json is the single source of truth for the NFR
+			// thresholds. NetworkProperties.loadNetworkSettings() (called from the
+			// NetworkManagment constructor) converts the configured percentages into absolute
+			// values against the network capacity implied by mirror_number:
+			//   number_of_links       = 25*24/2 = 300
+			//   link_threshold        35% of 300      = 105 active links
+			//   bandwidth_threshold   40% of 300*30   = 3600 Gbps
+			//   writing_times_threshold 45% of 300*20 = 2700 ms
+			// POMDP.getInitialStateRDM() compares the measured monitorables against these
+			// (al >= MON1, bw <= MON2, ttw <= MON3), so we only read them back here for
+			// logging and chart generation - never overwrite them.
+			Monitorables m = RDMSimConnector.network_management.network_properties.m;
+			this.mon1Threshold = m.getThresholdActiveLinks();
+			this.mon2Threshold = m.getThresholdBandwidthConsumption();
+			this.mon3Threshold = m.getThresholdTimeToWrite();
+
+			if (mon1Threshold <= 0 || mon2Threshold <= 0 || mon3Threshold <= 0) {
+				throw new RuntimeException("NFR thresholds not loaded from config_log_files/configuration.json"
+						+ " (got " + mon1Threshold + "/" + mon2Threshold + "/" + mon3Threshold + ")."
+						+ " Run with the working directory set to the RDMSim_TAAS project root; cwd="
+						+ System.getProperty("user.dir"));
+			}
+			log.info(
+					"NFR thresholds from configuration.json: MON1(active links)>={}, MON2(bandwidth Gbps)<={}, MON3(time to write ms)<={}",
+					mon1Threshold, mon2Threshold, mon3Threshold);
 
 			// Wire the experiment parameters read from solver.config into the connector
 			rdmConnector.setOutputDirectory(outputDir);
