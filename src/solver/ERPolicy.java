@@ -21,6 +21,8 @@ public class ERPolicy {
     private List<List<AlphaVector>> qFunctions;  // Q-functions indexed by action
     private double lambda;  // temperature parameter
     private Random rnd;
+    // Full (pruned) value function, used for the one-step-lookahead Q fallback.
+    private ArrayList<AlphaVector> valueFunction = null;
     
     public ERPolicy(
         POMDP pomdp, 
@@ -70,7 +72,13 @@ public class ERPolicy {
             }
         }
         
-        // Some actions might have empty Q-functions if no alpha vectors were assigned to them
+        // Perseus prunes the value function to the vectors that are optimal at some
+        // sampled belief. When one action dominates, no vector carries the other
+        // action's label and its grouped Q-set is empty. Keep the full value function
+        // so computeQValue can fall back to a one-step lookahead, which is defined for
+        // every action -- otherwise that action's Q is -Infinity and it can never be
+        // sampled, which silently disables the entropy-regularised mixing.
+        this.valueFunction = valueFunction;
     }
     
     /**
@@ -93,8 +101,7 @@ public class ERPolicy {
         // Compute Q-value for each action (max over alphas) --> len(qValues) = nActions
         double[] qValues = new double[nActions];
         for (int a = 0; a < nActions; a++) {
-            qValues[a] = computeQValue(belief, qFunctions.get(a));
-            System.out.println("[ERPolicy] Q-value for action " + a + ": " + qValues[a]);
+            qValues[a] = qValueForAction(belief, a);
         }
 
         // Compute softmax weights over the q-values
@@ -113,6 +120,21 @@ public class ERPolicy {
     }
     
     /**
+     * Q-value per action at this belief.
+     *
+     * The spread between these is what lambda is measured against in
+     * softmax(Q_a / lambda), so it is logged per timestep to calibrate the lambda grid.
+     */
+    public double[] getQValues(double[] belief) {
+        int nActions = qFunctions.size();
+        double[] qValues = new double[nActions];
+        for (int a = 0; a < nActions; a++) {
+            qValues[a] = qValueForAction(belief, a);
+        }
+        return qValues;
+    }
+
+    /**
      * Get action probabilities at belief
      */
     public double[] getActionProbabilities(double[] belief) {
@@ -120,7 +142,7 @@ public class ERPolicy {
         
         double[] qValues = new double[nActions];
         for (int a = 0; a < nActions; a++) {
-            qValues[a] = computeQValue(belief, qFunctions.get(a));
+            qValues[a] = qValueForAction(belief, a);
         }
         
         return softmax(qValues);
@@ -131,15 +153,69 @@ public class ERPolicy {
      * Returns Double.NEGATIVE_INFINITY if the list is empty
      */
     private double computeQValue(double[] belief, List<AlphaVector> Gamma) {
-        if (Gamma == null || Gamma.isEmpty()) {
-            return Double.NEGATIVE_INFINITY;
+        if (Gamma != null && !Gamma.isEmpty()) {
+            double maxVal = Double.NEGATIVE_INFINITY;
+            for (AlphaVector alpha : Gamma) {
+                double val = alpha.getDotProduct(belief);
+                if (val > maxVal) maxVal = val;
+            }
+            return maxVal;
         }
-        double maxVal = Double.NEGATIVE_INFINITY;
-        for (AlphaVector alpha : Gamma) {
-            double val = alpha.getDotProduct(belief);
-            if (val > maxVal) maxVal = val;
+        return Double.NEGATIVE_INFINITY;
+    }
+
+    /**
+     * Q(b,a) by one-step lookahead against the full value function:
+     *
+     *   Q(b,a) = sum_s b(s) R(s,a) + gamma * sum_o P(o|b,a) * max_alpha [ alpha . b^{a,o} ]
+     *
+     * Unlike the grouped-alpha form this is defined for every action, including ones
+     * that carry no alpha vector in the pruned value function.
+     */
+    private double computeQValueLookahead(double[] belief, int a) {
+        int nStates = pomdp.getNumStates();
+        int nObservations = pomdp.getNumObservations();
+
+        double immediate = 0.0;
+        for (int s = 0; s < nStates; s++) {
+            immediate += belief[s] * pomdp.getReward(s, a);
         }
-        return maxVal;
+
+        BeliefPoint b = new BeliefPoint(belief.clone());
+        pomdp.prepareBelief(b);
+
+        double future = 0.0;
+        for (int o = 0; o < nObservations; o++) {
+            double po = b.getActionObservationProbability(a, o);
+            if (po <= 0.0) {
+                continue;
+            }
+
+            double[] nextBelief = pomdp.updateBelief(b, a, o).getBelief();
+
+            double best = Double.NEGATIVE_INFINITY;
+            for (AlphaVector alpha : valueFunction) {
+                double val = alpha.getDotProduct(nextBelief);
+                if (val > best) best = val;
+            }
+            if (best > Double.NEGATIVE_INFINITY) {
+                future += po * best;
+            }
+        }
+
+        return immediate + pomdp.getDiscountFactor() * future;
+    }
+
+    /**
+     * Q-value for one action, preferring the exact grouped-alpha value and falling back
+     * to the lookahead when this action has no vector in the pruned value function.
+     */
+    private double qValueForAction(double[] belief, int a) {
+        double q = computeQValue(belief, qFunctions.get(a));
+        if (q == Double.NEGATIVE_INFINITY && valueFunction != null && !valueFunction.isEmpty()) {
+            q = computeQValueLookahead(belief, a);
+        }
+        return q;
     }
     
     /**
