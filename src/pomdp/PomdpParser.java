@@ -29,6 +29,15 @@ import java.util.Map;
 import solver.BeliefPoint;
 
 public class PomdpParser {
+
+	/**
+	 * Strength of the informative Dirichlet prior seeded from the parsed transition
+	 * function. alpha[s][a][s'] = priorStrength * T0[s][a][s'] * numStates, so the
+	 * default 1.0 carries the same total pseudo-count mass as the old flat alpha=1
+	 * prior (numStates per row) but keeps the shape of T0 instead of discarding it.
+	 * Set from solver.config before readPOMDP is called.
+	 */
+	public static double priorStrength = 1.0;
 	/**
 	 * Parse a .POMDP file and create POMDP object
 	 * @param filename full path to the .POMDP file
@@ -103,7 +112,12 @@ public class PomdpParser {
 				numActions = actions.size();
 				
 				for (int i = 0; i < numActions; i++) {
-					actionLabels.put(actionMap.get(actions.get(i)),actions.get(i));
+					// The line was lower-cased above but mapToInts keys on the upper-cased
+					// name, so look up (and store) the upper-cased label. Without this the
+					// map degenerates to {null=<last action>} and every dumped alpha vector
+					// is labelled "null".
+					String actionName = actions.get(i).toUpperCase();
+					actionLabels.put(actionMap.get(actionName), actionName);
 				}
 			}
 			
@@ -227,18 +241,30 @@ public class PomdpParser {
 		double[][][] observationBelief = new double[numActions][numStates][numObservations];
 		assert transitionFunction != null;
 		
+		// Validate the parsed model before it is used as a prior: a malformed row here
+		// is silent otherwise, and shows up much later as a nonsensical policy.
+		validateDistributions(transitionFunction, observationFunction, numStates, numActions, numObservations);
+
+		// transitionBeliefCurr: informative prior, shaped by the parsed transition
+		// function. transitionBeliefReset stays flat -- it is the reference
+		// distribution the SMiLe blend pulls back toward and must not carry the prior.
 		for (int stateIndex = 0; stateIndex < numStates; stateIndex++) {
 			for (int actionIndex = 0; actionIndex < numActions; actionIndex++) {
-				System.arraycopy(transitionFunction[stateIndex][actionIndex], 0, transitionBeliefCurr[stateIndex][actionIndex], 0, numStates);
-				Arrays.fill(transitionBeliefCurr[stateIndex][actionIndex], 1.0);
+				for (int nextStateIndex = 0; nextStateIndex < numStates; nextStateIndex++) {
+					transitionBeliefCurr[stateIndex][actionIndex][nextStateIndex] =
+							priorStrength * transitionFunction[stateIndex][actionIndex][nextStateIndex] * numStates;
+				}
 				Arrays.fill(transitionBeliefReset[stateIndex][actionIndex], 1.0);
 			}
 		}
-		
+
 		for (int actionIndex = 0; actionIndex < numActions; actionIndex++) {
 			for (int stateIndex = 0; stateIndex < numStates; stateIndex++) {
 				// Enforcing full BA-POMDP by turning observationFunction into a Dirichlet too
-				Arrays.fill(observationBelief[actionIndex][stateIndex], 1.0);
+				for (int obsIndex = 0; obsIndex < numObservations; obsIndex++) {
+					observationBelief[actionIndex][stateIndex][obsIndex] =
+							priorStrength * observationFunction[actionIndex][stateIndex][obsIndex] * numObservations;
+				}
 			}
 		}
 
@@ -273,5 +299,34 @@ public class PomdpParser {
 				observationBelief		
 				);				
 		}
+
+	/**
+	 * Every T: and O: row must be a probability distribution. Throws rather than
+	 * letting a malformed .POMDP through silently.
+	 */
+	private static void validateDistributions(double[][][] transitionFunction, double[][][] observationFunction,
+			int numStates, int numActions, int numObservations) {
+		final double tol = 1e-6;
+
+		for (int s = 0; s < numStates; s++) {
+			for (int a = 0; a < numActions; a++) {
+				double sum = Arrays.stream(transitionFunction[s][a]).sum();
+				if (Math.abs(sum - 1.0) > tol) {
+					throw new IllegalStateException(String.format(
+							"Malformed .POMDP: transition row T[s=%d][a=%d] sums to %.6f, expected 1.0", s, a, sum));
+				}
+			}
+		}
+
+		for (int a = 0; a < numActions; a++) {
+			for (int s = 0; s < numStates; s++) {
+				double sum = Arrays.stream(observationFunction[a][s]).sum();
+				if (Math.abs(sum - 1.0) > tol) {
+					throw new IllegalStateException(String.format(
+							"Malformed .POMDP: observation row O[a=%d][s=%d] sums to %.6f, expected 1.0", a, s, sum));
+				}
+			}
+		}
+	}
 }
 
