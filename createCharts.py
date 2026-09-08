@@ -17,10 +17,13 @@ logger.add(sys.stderr, level="INFO", format="<green>{time:HH:mm:ss}</green> | <l
 # main timeseries dataframe: RDM.alpha (solver value-function dump), SelectedAction.txt
 # (categorical, not merged), state_transitions.txt and monitorables.txt (wide, own shape),
 # charts.html (this script's own output, left in output_dir by a previous run).
-SKIP_FILES = {"SelectedAction.txt", "state_transitions.txt", "monitorables.txt", "charts.html"}
+SKIP_FILES = {"state_transitions.txt", "monitorables.txt", "charts.html", "runSummary.txt", "qvalues.txt"}
 
-# Skip this many initial surprise rows so MIP cold-start (first 2*lookback) does not skew normalisation
-MIP_WARMUP_ROWS = 2 * 5  # 2 * lookback (Java default lookback=5)
+# Skip this many initial surprise rows so MIP cold-start (first 2*lookback) does not skew
+# normalisation. Set from the actual lookback via --lookback so it cannot drift out of sync
+# with solver.config (it was previously hardcoded to 2*5 while runs used lookback=4).
+DEFAULT_LOOKBACK = 4
+MIP_WARMUP_ROWS = 2 * DEFAULT_LOOKBACK
 
 # Window size for moving average smoothing
 SMOOTHING_WINDOW = 5
@@ -242,6 +245,72 @@ def mipChart(df):
     return fig
 
 
+def actionTrace(df):
+    """Which topology was selected at each timestep, plus the running share of RT.
+
+    The action trace was previously never plotted (SelectedAction.txt was in the skip
+    list), which made it impossible to see what the policy was actually doing.
+    """
+    if "selectedaction" not in df.columns:
+        logger.warning("No selectedaction column; skipping action trace chart")
+        return go.Figure()
+
+    action = df["selectedaction"]
+    running_rt = action.expanding().mean()
+
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        subplot_titles=("Selected topology (0 = MST, 1 = RT)", "Running share of RT"),
+    )
+    fig.add_trace(
+        go.Scattergl(x=df["timestep"], y=action, mode="markers", name="action",
+                     marker=dict(size=4)),
+        row=1, col=1,
+    )
+    fig.add_trace(
+        go.Scatter(x=df["timestep"], y=running_rt, mode="lines", name="RT share"),
+        row=2, col=1,
+    )
+    fig.update_yaxes(tickvals=[0, 1], ticktext=["MST", "RT"], row=1, col=1)
+    fig.update_yaxes(range=[0, 1], row=2, col=1)
+    fig.update_xaxes(title_text="timestep", row=2, col=1)
+    fig.update_layout(height=520, showlegend=False)
+    return fig
+
+
+def rollingSatisfaction(df, window=50):
+    """Rolling per-NFR satisfaction rate.
+
+    Uses the satisfaction flags now written alongside the measured values in
+    MON{1,2,3}Sat.txt. Per-NFR (not joint) because MON2/MON3 are monotone increasing in
+    active links while MON1 needs active links high, so the three cannot generally be
+    satisfied together on this exemplar.
+    """
+    flags = [("mon1satflag", "MON1 (active links)"),
+             ("mon2satflag", "MON2 (bandwidth)"),
+             ("mon3satflag", "MON3 (time to write)")]
+    available = [(c, label) for c, label in flags if c in df.columns]
+    if not available:
+        logger.warning("No satisfaction flag columns; skipping rolling satisfaction chart")
+        return go.Figure()
+
+    effective_window = min(window, max(1, len(df) // 2))
+    fig = go.Figure()
+    for col, label in available:
+        rolling = df[col].rolling(window=effective_window, min_periods=1).mean()
+        fig.add_trace(go.Scatter(x=df["timestep"], y=rolling, mode="lines", name=label))
+        overall = df[col].mean()
+        fig.add_hline(y=overall, line_dash="dot", line_width=1,
+                      annotation_text=f"{label} overall {overall:.1%}")
+
+    fig.update_layout(
+        title=f"Rolling per-NFR satisfaction rate (window={effective_window})",
+        xaxis_title="timestep", yaxis_title="satisfaction rate",
+        yaxis=dict(range=[0, 1]), height=460,
+    )
+    return fig
+
+
 def buildChartsReport(df, mon1_threshold=20.0, mon2_threshold=20.0, mon3_threshold=20.0):
     """
     Build all charts and combine them into a single self-contained HTML page (Plotly's JS
@@ -281,6 +350,12 @@ def buildChartsReport(df, mon1_threshold=20.0, mon2_threshold=20.0, mon3_thresho
     logger.info("Stage: Building MON1/MON2/MON3 satisfaction violin distributions")
     violins_fig = satisfactionViolins(satisfaction_df)
 
+    logger.info("Stage: Building rolling per-NFR satisfaction chart")
+    rolling_fig = rollingSatisfaction(df)
+
+    logger.info("Stage: Building action trace chart")
+    action_fig = actionTrace(df)
+
     sections = [
         ("MIP Over Time", mip_fig, True),
         ("Learning Rate (Gamma) Over Time", gamma_fig, False),
@@ -288,6 +363,8 @@ def buildChartsReport(df, mon1_threshold=20.0, mon2_threshold=20.0, mon3_thresho
         ("Surprise Over Time (Standardised)", surprise_norm_fig, False),
         ("MON1/MON2/MON3 Satisfaction Over Time", satisfaction_fig, False),
         ("MON1/MON2/MON3 Satisfaction Distributions", violins_fig, False),
+        ("Rolling Per-NFR Satisfaction Rate", rolling_fig, False),
+        ("Selected Adaptation Action", action_fig, False),
     ]
 
     parts = ["<html><head><title>RDMSim Charts</title></head><body>"]
@@ -381,6 +458,11 @@ def getData(folder_path=None):
             df.columns = ["timestep", "mip_lower", "mip_upper"]
             logger.info("Read {} ({} rows)", filename, len(df))
             dfs_2.append(df)
+        elif df.shape[1] == 3 and file_col_name.endswith("sat"):
+            # MON{1,2,3}Sat.txt are "timestep measuredValue satisfiedFlag".
+            df.columns = ["timestep", file_col_name, file_col_name + "flag"]
+            logger.info("Read {} ({} rows, with satisfaction flag)", filename, len(df))
+            dfs_2.append(df)
         elif df.shape[1] == 2:
             df.columns = ["timestep", file_col_name]
             logger.info("Read {} ({} rows)", filename, len(df))
@@ -449,7 +531,13 @@ if __name__ == "__main__":
         "--mon3-threshold", type=float, default=20.0, metavar="VALUE",
         help="MON3 (time to write, ms) threshold from solver.config. Default 20.",
     )
+    parser.add_argument(
+        "--lookback", type=int, default=DEFAULT_LOOKBACK, metavar="N",
+        help=f"MIP lookback from solver.config; the first 2*lookback surprise rows are "
+             f"discarded as cold-start. Default {DEFAULT_LOOKBACK}.",
+    )
     args = parser.parse_args()
+    MIP_WARMUP_ROWS = 2 * args.lookback
     run(
         data_dir=args.output_dir,
         mon1_threshold=args.mon1_threshold,
