@@ -131,6 +131,8 @@ public class BeliefPoint {
 	 * Returns true if action observation probabilities have been initialised
 	 * @return
 	 */
+	private int preparedModelVersion = -1;
+
 	public boolean hasActionObservationProbabilities() {
 		return actionObservationProbInitialized;
 	}
@@ -140,9 +142,22 @@ public class BeliefPoint {
 	 * @param aoProbs action observation probabilities
 	 */
 	public void setActionObservationProbabilities(double[][] aoProbs) {
-		assert this.aoProbs == null;
 		this.aoProbs = aoProbs;
 		this.actionObservationProbInitialized = true;
+	}
+
+	/**
+	 * Version of the POMDP model the cached action-observation probabilities were
+	 * computed under. The planning model is re-derived from the Dirichlet counts every
+	 * timestep, so a cache computed under an older model yields the wrong normalising
+	 * constant in updateBelief and produces an unnormalised belief.
+	 */
+	public int getPreparedModelVersion() {
+		return preparedModelVersion;
+	}
+
+	public void setPreparedModelVersion(int version) {
+		this.preparedModelVersion = version;
 	}
 	
 	/**

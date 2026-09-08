@@ -20,6 +20,7 @@ package pomdp;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 
 import remotemirroring.RDMSimConnector;
@@ -48,6 +49,10 @@ public class POMDP {
 	private double minReward = Double.POSITIVE_INFINITY;
 	
 	private BeliefPoint b0;
+
+	// Incremented whenever the planning model is re-derived from the Dirichlet counts,
+	// so cached per-belief action-observation probabilities can be invalidated.
+	private int modelVersion = 0;
 	
 	private HashMap<Integer,String> actionLabels;
 	
@@ -91,6 +96,49 @@ public class POMDP {
 		return discountFactor;
 	}
 	
+	/**
+	 * Recompute the planning model from the Dirichlet pseudo-counts that
+	 * RDMSimConnector maintains (SMiLe / surprise updates).
+	 *
+	 * The reference implementation normalises transitionBeliefCurr and
+	 * observationBelief inside getTransitionProbability/getObservationProbability.
+	 * Those accessors sit in the innermost loop of every solver, so instead of
+	 * dividing on every call we normalise once into transitionFunction /
+	 * observationFunction and call this whenever the counts change (after each
+	 * Dirichlet update, and before each solve). The result is identical: the
+	 * counts are constant for the duration of a solve.
+	 */
+	public void refreshLearnedModel() {
+		modelVersion++;
+
+		for(int s=0; s<nStates; s++) {
+			for(int a=0; a<nActions; a++) {
+				double total = Arrays.stream(transitionBeliefCurr[s][a]).sum();
+				if(total <= 0.0) {
+					// degenerate row: fall back to uniform rather than emitting NaN
+					Arrays.fill(transitionFunction[s][a], 1.0 / nStates);
+					continue;
+				}
+				for(int sNext=0; sNext<nStates; sNext++) {
+					transitionFunction[s][a][sNext] = transitionBeliefCurr[s][a][sNext] / total;
+				}
+			}
+		}
+
+		for(int a=0; a<nActions; a++) {
+			for(int s=0; s<nStates; s++) {
+				double total = Arrays.stream(observationBelief[a][s]).sum();
+				if(total <= 0.0) {
+					Arrays.fill(observationFunction[a][s], 1.0 / nObservations);
+					continue;
+				}
+				for(int o=0; o<nObservations; o++) {
+					observationFunction[a][s][o] = observationBelief[a][s][o] / total;
+				}
+			}
+		}
+	}
+
 	public double getTransitionProbability(int s, int a, int sNext) {
 		assert s<nStates && a<nActions && sNext<nStates;
 		return transitionFunction[s][a][sNext];
@@ -126,8 +174,8 @@ public class POMDP {
 		assert a<nActions && o<nObservations;
 		double[] newBelief = new double[nStates];
 		
-		// check if belief point has been prepared
-		if(!b.hasActionObservationProbabilities()) {
+		// (Re)prepare if never prepared, or prepared under an older version of the model.
+		if(!b.hasActionObservationProbabilities() || b.getPreparedModelVersion() != modelVersion) {
 			prepareBelief(b);
 		}
 		
@@ -151,7 +199,7 @@ public class POMDP {
 	
 	public void prepareBelief(BeliefPoint b) {
 		assert b != null;
-		if(b.hasActionObservationProbabilities()) return;
+		if(b.hasActionObservationProbabilities() && b.getPreparedModelVersion() == modelVersion) return;
 		
 		double[][] aoProbs = new double[nActions][nObservations];
 		
@@ -174,6 +222,7 @@ public class POMDP {
 		}
 		
 		b.setActionObservationProbabilities(aoProbs);
+		b.setPreparedModelVersion(modelVersion);
 	}
 	
 	public BeliefPoint getInitialBelief() {
@@ -274,7 +323,7 @@ public class POMDP {
 		band_max=band_min*2;
 		double ttw_min,ttw_max;
 		ttw_min=(RDMSimConnector.network_management.network_properties.number_of_links*20/3);
-		ttw_max=band_min*2;
+		ttw_max=ttw_min*2;   // was band_min*2 -- copy-paste bug that widened the mid ttw bin
 		
 		if (rec_sMEC < band_min && anl_sMR < links_min & sMP<ttw_min) {
 			// return the observation

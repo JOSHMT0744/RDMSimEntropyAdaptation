@@ -20,6 +20,7 @@ import rdm.management.NetworkManagment;
 import rdm.management.Probe;
 import rdm.management.RDMSimulator;
 import rdm.network.Monitorables;
+import rdm.simulation.UncertaintyScenario;
 import remotemirroring.OutputLogger;
 import remotemirroring.RDMSimConnector;
 import remotemirroring.RDMTransitionProb;
@@ -56,10 +57,11 @@ public class RDMSim_TAAS {
 	 * paper experiments.
 	 */
 	private int runSeed = 222;
+	private String algorithmType = "erperseus";
 	private String surpriseMeasureForGamma = "MIP";
 	private double p_c = 0.5;
 	private boolean useSurpriseUpdating = true;
-	private int lookback = 5;
+	private int lookback = 4;   // keep in sync with solver.config and RDMSimConnector
 
 	/**
 	 * NFR satisfaction thresholds, in absolute units. These are NOT read from
@@ -133,7 +135,7 @@ public class RDMSim_TAAS {
 	 * @param mecThreshold MEC threshold from solver.config (--mec-threshold).
 	 * @param rplThreshold RPL threshold from solver.config (--rpl-threshold).
 	 */
-	public static void runPython(String outputDirForCharts, double mon1Threshold, double mon2Threshold, double mon3Threshold) throws Exception {
+	public static void runPython(String outputDirForCharts, double mon1Threshold, double mon2Threshold, double mon3Threshold, int lookback) throws Exception {
 		// Try to find Python executable in virtual environment
 		String pythonPath = findPythonExecutable();
 		if (pythonPath == null) {
@@ -150,13 +152,14 @@ public class RDMSim_TAAS {
 		
 		// Resolve output dir to absolute path so createCharts.py reads from the correct run directory (e.g. init_runs/s222)
 		String outputDirAbs = new File(outputDirForCharts).getAbsolutePath();
-		log.info("Running createCharts.py with --output-dir {} --mon1-threshold {} --mon2-threshold {} --mon3-threshold {}", outputDirAbs, mon1Threshold, mon2Threshold, mon3Threshold);
+		log.info("Running createCharts.py with --output-dir {} --mon1-threshold {} --mon2-threshold {} --mon3-threshold {} --lookback {}", outputDirAbs, mon1Threshold, mon2Threshold, mon3Threshold, lookback);
 		ProcessBuilder pb = new ProcessBuilder(
 			pythonPath, chartsScript,
 			"--output-dir", outputDirAbs,
 			"--mon1-threshold", String.valueOf(mon1Threshold),
 			"--mon2-threshold", String.valueOf(mon2Threshold),
-			"--mon3-threshold", String.valueOf(mon3Threshold)
+			"--mon3-threshold", String.valueOf(mon3Threshold),
+			"--lookback", String.valueOf(lookback)
 		);
 		pb.redirectErrorStream(true);
 		Process p = pb.start();
@@ -336,6 +339,7 @@ public class RDMSim_TAAS {
 
 		// General Settings
 		String algorithmType = getPropertyOrThrow(properties, "algorithmType");
+		this.algorithmType = algorithmType;
 		String lambda = getPropertyOrThrow(properties, "lambda");
 		sp.setLambda(Double.parseDouble(lambda));
 		sp.setTimeLimit(Double.parseDouble(getPropertyOrThrow(properties, "timeLimit")));
@@ -358,10 +362,18 @@ public class RDMSim_TAAS {
 					"useSurpriseUpdating must be true or false; got '" + useSurpriseUpdatingStr + "'");
 		}
 		this.useSurpriseUpdating = useSurpriseUpdatingStr.equals("true");
-		this.lookback = Integer.parseInt(getProperty(properties, "lookback", "5"));
+		this.lookback = Integer.parseInt(getProperty(properties, "lookback", "4"));
 		if (this.lookback <= 0) {
 			throw new RuntimeException("lookback must be > 0; got " + this.lookback);
 		}
+
+		// Strength of the informative Dirichlet prior seeded from the .POMDP transition
+		// function. 1.0 keeps the same total pseudo-count mass as a flat alpha=1 prior.
+		PomdpParser.priorStrength = Double.parseDouble(getProperty(properties, "priorStrength", "1.0"));
+		if (PomdpParser.priorStrength <= 0) {
+			throw new RuntimeException("priorStrength must be > 0; got " + PomdpParser.priorStrength);
+		}
+
 
 		// Optional link failure injection
 		/*
@@ -398,7 +410,7 @@ public class RDMSim_TAAS {
 
 		// Error checking solver.config parameters
 		if (!algorithmType.equals("perseus") && !algorithmType.equals("gip") && !algorithmType.equals("erpbvi")
-				&& !algorithmType.equals("erperseus")) {
+				&& !algorithmType.equals("erperseus") && !algorithmType.equals("fasterpbvi")) {
 			throw new RuntimeException("Unexpected algorithm type in properties file");
 		}
 
@@ -420,6 +432,7 @@ public class RDMSim_TAAS {
 				"Solver parameters: epsilon={}, valueFunctionTolerance={}, timeLimit={}, beliefSamplingRuns={}, beliefSamplingSteps={}, lambda={}",
 				sp.getEpsilon(), sp.getValueFunctionTolerance(), sp.getTimeLimit(), sp.getBeliefSamplingRuns(),
 				sp.getBeliefSamplingSteps(), sp.getLambda());
+		log.info("Dirichlet priorStrength={}", PomdpParser.priorStrength);
 		log.info(
 				"Experiment: runSeed={}, surpriseMeasure={}, p_c={}, useSurpriseUpdating={}, lookback={}",
 				runSeed, surpriseMeasureForGamma, p_c, useSurpriseUpdating, lookback);
@@ -545,6 +558,13 @@ public class RDMSim_TAAS {
 			POMDP rdmPOMDP = PomdpParser.readPOMDP(pomdpFile.getAbsolutePath());
 
 			int mst_cnt = 0, rt_cnt = 0;
+
+			// End-of-run summary tallies (per-NFR reporting).
+			int mon1SatCount = 0, mon2SatCount = 0, mon3SatCount = 0;
+			double mon1ProbSum = 0.0, mon2ProbSum = 0.0, mon3ProbSum = 0.0;
+			double activeLinksSum = 0.0, bandwidthSum = 0.0, timeToWriteSum = 0.0;
+			int observedSteps = 0;
+			int stateChanges = 0;
 			RDMSimConnector rdmConnector = new RDMSimConnector();
 			RDMTransitionProb rdmTransProbs = new RDMTransitionProb();
 
@@ -586,64 +606,65 @@ public class RDMSim_TAAS {
 			String[] logFiles = { "monitorables.txt", "MON1Sat.txt", "MON1SatProb.txt", "MON2Sat.txt",
 					"MON2SatProb.txt", "MON3Sat.txt", "MON3SatProb.txt", "SelectedAction.txt",
 					"state_transitions.txt", "surpriseBF.txt", "surpriseCC.txt", "surpriseMIP.txt",
-					"gamma.txt", "MIPBounds.txt" };
+					"gamma.txt", "MIPBounds.txt", "runSummary.txt", "qvalues.txt" };
 			for (String f : logFiles) {
 				outputLogger.clearFile(f);
 			}
+			// The solver appends its value function every timestep; start from empty.
+			outputLogger.clearFile(new File(pomdpFileName).getName().replace(".POMDP", "") + ".alpha");
 			outputLogger.writeMonitorablesHeader();
 
 			// Get pre-defined scenario and its corresponding initial transitionFunction
 			int currentscenario_case = RDMSimConnector.network_management.simulation_properties.getUncertaintyScenario()
 					.getCurrentScenario();
 
-			if (currentscenario_case == 0) {
-				rdmPOMDP.transitionFunction = RDMTransitionProb.getTransitionFunction();
-			} else {
-				rdmPOMDP.transitionFunction = RDMTransitionProb.getTransitionFunctionCase(currentscenario_case);
+			log.info("Uncertainty scenario: {}", currentscenario_case);
+
+			// Deviation magnitudes for the active scenario, read from configuration.json
+			// rather than the hardcoded 9..12 that used to sit in the loop.
+			UncertaintyScenario us = RDMSimConnector.network_management.simulation_properties.getUncertaintyScenario();
+			int deviationMin = us.getMinDeviationMSTLinks();
+			int deviationMax = us.getMaxDeviationMSTLinks();
+			if (deviationMax < deviationMin) {
+				deviationMax = deviationMin;
 			}
+			log.info("Deviation range for scenario {}: [{}, {}]", currentscenario_case, deviationMin, deviationMax);
+
+			// The planning model is NOT set from RDMTransitionProb. It is the normalised
+			// Dirichlet posterior (transitionBeliefCurr), seeded from the .POMDP prior and
+			// updated each timestep by the SMiLe/surprise machinery in RDMSimConnector.
+			// Overwriting transitionFunction here would hand the planner a hand-coded model
+			// and make the whole learning path inert.
+			rdmPOMDP.refreshLearnedModel();
 
 			RDMSimConnector.p = rdmPOMDP;
+
+			// Single policy RNG for the whole run. Constructing this inside the loop
+			// reset the stream to runSeed every timestep, which collapses the stochastic
+			// policy to a deterministic threshold rule once lambda > 0.
+			Random policyRandom = new Random(runSeed);
+
+			// Deviation RNG, seeded so runs are reproducible (Math.random() was not).
+			Random deviationRandom = new Random(runSeed);
+
+			// The state/action of the previous iteration. RDMSim only reveals the effect of
+			// an action on the NEXT getMonitorables(), so the transition (prevState,
+			// prevAction) -> cs can only be recorded once cs has been monitored.
+			int prevState = -1;
+			int prevAction = -1;
 
 			// Beginning of MAPE-K loop
 			for (RDMSimConnector.timestep = 0; RDMSimConnector.timestep < RDMSimConnector.network_management.simulation_properties
 					.getSimulationRuns(); RDMSimConnector.timestep++) {
 
-				// I really don't know what this `todeviate` stuff is about... The docs don't
-				// explain it
-				int todeviate = 2;
-				System.out.println(todeviate);
+				// Per-timestep deviation magnitudes used by RDMTransitionProb's scenario
+				// cases. Seeded from runSeed so a run is reproducible; Math.random() here
+				// previously made runs irreproducible despite runSeed being plumbed through
+				// everywhere else.
+				RDMTransitionProb.random_int = deviationMin + deviationRandom.nextInt(deviationMax - deviationMin + 1);
+				RDMTransitionProb.random_int1 = deviationMin + deviationRandom.nextInt(deviationMax - deviationMin + 1);
+				RDMTransitionProb.random_int2 = deviationMin + deviationRandom.nextInt(deviationMax - deviationMin + 1);
 
-				if (todeviate == 2) {
-					// RDMTransitionProb.deviation_timesteps = (int)(Math.random() *
-					// (RDMConfigurationConnected.deviation_timesteps_max-
-					// RDMConfigurationConnected.deviation_timesteps_min + 1) +
-					// RDMConfigurationConnected.deviation_timesteps_min);
-
-					RDMTransitionProb.random_int = (int) (Math.random() * (12 - 9 + 1) + 9);
-					// System.out.println("Random Number: "+RDMTransitionProb.random_int);
-					// timestepcounter=0;
-					///// For case 3
-					RDMTransitionProb.random_int1 = (int) (Math.random() * (12 - 9 + 1) + 9);
-					RDMTransitionProb.random_int2 = (int) (Math.random() * (12 - 9 + 1) + 9);
-
-				} else {
-					RDMTransitionProb.deviation_timesteps = 0;
-					RDMTransitionProb.random_int = 0;
-					// timestepcounter=0;
-
-					RDMTransitionProb.random_int1 = 0;
-					RDMTransitionProb.random_int2 = 0;
-					System.out.println("no deviation for this timestep");
-				}
-				
-				// update pomdp transition function according to the current scenario
-				if(currentscenario_case==0) {
-					rdmPOMDP.transitionFunction=RDMTransitionProb.getTransitionFunction();
-				} else {
-					rdmPOMDP.transitionFunction=RDMTransitionProb.getTransitionFunctionCase(currentscenario_case);
-				}
-				
-				RDMSimConnector.p=rdmPOMDP;
 
 
 				/*
@@ -668,68 +689,106 @@ public class RDMSim_TAAS {
 				* Copmute belief state and satisfaction probabilites. 
 				* The baseline state is implicitly available from the previous simulation run
 				*/
-				int cs = rdmPOMDP.getInitialStateRDM(); // CHECK HERE
-				System.out.println("Initial state: "+cs);
-				rdmPOMDP.setCurrentState(cs);
-					
-				System.out.println("current state: "+ rdmPOMDP.getCurrentState());
+				int cs = rdmPOMDP.getInitialStateRDM();
+				System.out.println("Observed state: "+cs);
 
-				// Get current belief over states (where each state represents the satisfaction combination for the NFRs)
+				/*
+				 * LEARN
+				 * The monitorables just read are the consequence of the action executed on
+				 * the previous timestep, so this is the point at which the transition
+				 * (prevState, prevAction) -> cs is known. Fold it into the Dirichlet counts
+				 * (surprise + SMiLe), refresh the planning model, and advance the belief
+				 * filter. Doing this at EXECUTE time instead reads a stale probe and records
+				 * a self-transition every step.
+				 */
+				if (RDMSimConnector.timestep > 0) {
+					rdmConnector.observeTransition(prevAction, cs);
+					rdmPOMDP = RDMSimConnector.p;
+
+					double[] pb = rdmPOMDP.getInitialBelief().getBelief();
+					outputLogger.appendRow("state_transitions.txt", RDMSimConnector.timestep - 1, prevState,
+						prevAction, cs, pb[0], pb[1], pb[2], pb[3], pb[4], pb[5], pb[6], pb[7]);
+					if (prevState != cs) {
+						stateChanges++;
+					}
+				}
+
+				rdmPOMDP.setCurrentState(cs);
+
+				// Get current belief over states (each state is an NFR satisfaction combination)
 				BeliefPoint initialbelief=rdmPOMDP.getInitialBelief();
 				double b[]=initialbelief.getBelief();
-				System.out.println("Initial Belief: "+b[0]+" "+b[1]+" "+b[2]+" "+b[3]+" "+b[4]+" "+b[5]+" "+b[6]+" "+b[7]);
+				System.out.println("Belief: "+b[0]+" "+b[1]+" "+b[2]+" "+b[3]+" "+b[4]+" "+b[5]+" "+b[6]+" "+b[7]);
+				// State encoding is (MC, MR, MP) = (bandwidth ok, links ok, ttw ok).
+				// Note the naming: mc -> MON2 (bandwidth), mr -> MON1 (links), mp -> MON3 (ttw).
 				double mcsatprob=b[0]+b[1]+b[2]+b[3];
 				double mrsatprob=b[0]+b[1]+b[4]+b[5];
 				double mpsatprob=b[0]+b[2]+b[4]+b[6];
-				
+
 				////Results Log Regression////////
-				
+
 				pw_mc_regr.println(ResultsLog.bandwidthconsumption+","+mcsatprob+","+ResultsLog.satmc);
 				pw_mr_regr.println(ResultsLog.activelinks+","+mrsatprob+","+ResultsLog.satmr);
 				pw_mp_regr.println(ResultsLog.timetowrite+","+mpsatprob+","+ResultsLog.satmp);
 
-				// MON1 = active links, MON2 = bandwidth consumption, MON3 = time to write
-				outputLogger.appendRow("MON1Sat.txt", RDMSimConnector.timestep, ResultsLog.activelinks);
+				// Running per-NFR tallies for the end-of-run summary.
+				mon1SatCount += ResultsLog.satmr;
+				mon2SatCount += ResultsLog.satmc;
+				mon3SatCount += ResultsLog.satmp;
+				mon1ProbSum += mrsatprob;
+				mon2ProbSum += mcsatprob;
+				mon3ProbSum += mpsatprob;
+				activeLinksSum += ResultsLog.activelinks;
+				bandwidthSum += ResultsLog.bandwidthconsumption;
+				timeToWriteSum += ResultsLog.timetowrite;
+				observedSteps++;
+
+				// MON1 = active links, MON2 = bandwidth consumption, MON3 = time to write.
+				// Each MONnSat row is "timestep measuredValue satisfiedFlag".
+				outputLogger.appendRow("MON1Sat.txt", RDMSimConnector.timestep, ResultsLog.activelinks, ResultsLog.satmr);
 				outputLogger.appendRow("MON1SatProb.txt", RDMSimConnector.timestep, mrsatprob);
-				outputLogger.appendRow("MON2Sat.txt", RDMSimConnector.timestep, ResultsLog.bandwidthconsumption);
+				outputLogger.appendRow("MON2Sat.txt", RDMSimConnector.timestep, ResultsLog.bandwidthconsumption, ResultsLog.satmc);
 				outputLogger.appendRow("MON2SatProb.txt", RDMSimConnector.timestep, mcsatprob);
-				outputLogger.appendRow("MON3Sat.txt", RDMSimConnector.timestep, ResultsLog.timetowrite);
+				outputLogger.appendRow("MON3Sat.txt", RDMSimConnector.timestep, ResultsLog.timetowrite, ResultsLog.satmp);
 				outputLogger.appendRow("MON3SatProb.txt", RDMSimConnector.timestep, mpsatprob);
 
 
 				/*
 				* PLAN
-				* Solve the POMDP to determine the optimal adaptation action given the current belief state
-				* Each AlphaVector encodes a lienar function over beliefs
+				* Solve the POMDP to determine the optimal adaptation action for the belief
 				*/
 				ArrayList<AlphaVector> V1=solver.solve(rdmPOMDP);
-			 	System.out.println("Value size: "+V1.size()+"  Action label: "+ V1.get(0).getAction());
+				System.out.println("Value size: "+V1.size());
 
 				// select action using the relevant selected action-selection policy
 				int selectedAction;
 				if (solver instanceof ERPBVI) {
-					// ERPBVI has Q-functions directly available
-					erPolicy = new ERPolicy(rdmPOMDP, (ERPBVI)solver, new Random(runSeed));
-					selectedAction = erPolicy.selectAction(rdmPOMDP.getInitialBelief());
+					erPolicy = new ERPolicy(rdmPOMDP, (ERPBVI)solver, policyRandom);
+					selectedAction = erPolicy.selectAction(initialbelief);
 				} else if (solver instanceof ERPerseus) {
-					// ERPerseus: extract Q-functions from value function
 					double lambda = ((ERPerseus) solver).getLambda();
-					erPolicy = new ERPolicy(rdmPOMDP, V1, lambda, new Random(runSeed));
-					selectedAction = erPolicy.selectAction(rdmPOMDP.getInitialBelief());
+					erPolicy = new ERPolicy(rdmPOMDP, V1, lambda, policyRandom);
+					selectedAction = erPolicy.selectAction(initialbelief);
 				} else {
-					int bestIndex = AlphaVector.getBestVectorIndex(rdmPOMDP.getInitialBelief().getBelief(), V1);
+					int bestIndex = AlphaVector.getBestVectorIndex(initialbelief.getBelief(), V1);
 					selectedAction = V1.get(bestIndex).getAction();
+				}
+				// Log per-action Q-values: their spread is the scale lambda must be set against.
+				if (erPolicy != null) {
+					double[] qv = erPolicy.getQValues(initialbelief.getBelief());
+					if (qv.length >= 2) {
+						outputLogger.appendRow("qvalues.txt", RDMSimConnector.timestep, qv[0], qv[1], Math.abs(qv[0] - qv[1]));
+					}
 				}
 				log.debug("Selected action: {}", selectedAction);
 				outputLogger.appendRow("SelectedAction.txt", RDMSimConnector.timestep, selectedAction);
 
 				/*
 				* EXECUTE
-				* Execute the selected action (changing topology)
-				* This also updates POMDP beliefs and transition probabilities
+				* Apply the action (changing topology). Its effect is only visible at the next
+				* getMonitorables(), and is folded into the model by the LEARN block above on
+				* the following iteration.
 				*/
-
-				// Check below is correct with index matching actions
 				if(selectedAction==0) {
 					mst_cnt++;
 				} else {
@@ -739,16 +798,19 @@ public class RDMSim_TAAS {
 				rdmPOMDP.setInitialBelief(initialbelief);
 				RDMSimConnector.p = rdmPOMDP;
 
-				// Check Perform Action
 				rdmConnector.performAction(selectedAction);
-				rdmPOMDP = RDMSimConnector.p;
-				System.out.println("Current State: "+rdmPOMDP.getCurrentState());
 
-				outputLogger.appendRow("state_transitions.txt", RDMSimConnector.timestep, cs, selectedAction,
-						rdmPOMDP.getCurrentState(), b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
-			
-			System.out.println("\nTopology Count:: MST: "+mst_cnt+" RT: "+rt_cnt);
+				prevState = cs;
+				prevAction = selectedAction;
+
+				System.out.println("Topology Count:: MST: "+mst_cnt+" RT: "+rt_cnt);
 			}
+
+			// Per-NFR run summary (see writeRunSummary).
+			writeRunSummary(outputDir, observedSteps, stateChanges, mst_cnt, rt_cnt,
+				mon1SatCount, mon2SatCount, mon3SatCount,
+				mon1ProbSum, mon2ProbSum, mon3ProbSum,
+				activeLinksSum, bandwidthSum, timeToWriteSum, currentscenario_case);
 
 			pw_mc_regr.flush();
 			pw_mp_regr.flush();
@@ -758,7 +820,7 @@ public class RDMSim_TAAS {
 			pw_mp_regr.close();
 
 			try {
-				runPython(outputDir, mon1Threshold, mon2Threshold, mon3Threshold);
+				runPython(outputDir, mon1Threshold, mon2Threshold, mon3Threshold, lookback);
 			} catch (Exception chartEx) {
 				log.warn("Chart generation failed: {}", chartEx.getMessage());
 			}
@@ -770,14 +832,72 @@ public class RDMSim_TAAS {
 	}
 
 	/**
+	 * Per-NFR run summary. Thresholds come from config_log_files/configuration.json.
+	 * Satisfaction is reported per NFR rather than jointly: MON2 (bandwidth) and MON3
+	 * (time to write) are both monotone increasing in active links, while MON1 requires
+	 * active links to be high, so the three are not jointly satisfiable in general.
+	 */
+	private void writeRunSummary(String outputDir, int steps, int stateChanges, int mstCount, int rtCount,
+		int mon1Sat, int mon2Sat, int mon3Sat,
+		double mon1ProbSum, double mon2ProbSum, double mon3ProbSum,
+		double activeLinksSum, double bandwidthSum, double timeToWriteSum, int scenario) {
+		if (steps <= 0) {
+			log.warn("No observed steps; skipping run summary");
+			return;
+		}
+
+		int transitions = Math.max(0, steps - 1);
+		double changeRate = transitions > 0 ? ((double) stateChanges) / transitions : 0.0;
+
+		try (PrintWriter out = new PrintWriter(new FileWriter(new File(outputDir, "runSummary.txt")))) {
+			out.printf("timesteps	%d%n", steps);
+			out.printf("scenario	%d%n", scenario);
+			out.printf("algorithm	%s%n", algorithmType);
+			out.printf("lambda	%.4f%n", sp.getLambda());
+			out.printf("runSeed	%d%n", runSeed);
+			out.printf("surpriseMeasure	%s%n", surpriseMeasureForGamma);
+			out.printf("p_c	%.4f%n", p_c);
+			out.printf("lookback	%d%n", lookback);
+			out.printf("useSurpriseUpdating	%b%n", useSurpriseUpdating);
+			out.printf("priorStrength	%.4f%n", PomdpParser.priorStrength);
+			out.println();
+			out.printf("MON1_satisfaction_rate	%.4f%n", ((double) mon1Sat) / steps);
+			out.printf("MON2_satisfaction_rate	%.4f%n", ((double) mon2Sat) / steps);
+			out.printf("MON3_satisfaction_rate	%.4f%n", ((double) mon3Sat) / steps);
+			out.printf("MON1_mean_belief_prob	%.4f%n", mon1ProbSum / steps);
+			out.printf("MON2_mean_belief_prob	%.4f%n", mon2ProbSum / steps);
+			out.printf("MON3_mean_belief_prob	%.4f%n", mon3ProbSum / steps);
+			out.println();
+			out.printf("mean_active_links	%.2f%n", activeLinksSum / steps);
+			out.printf("mean_bandwidth_consumption	%.2f%n", bandwidthSum / steps);
+			out.printf("mean_time_to_write	%.2f%n", timeToWriteSum / steps);
+			out.printf("threshold_active_links	%.2f%n", mon1Threshold);
+			out.printf("threshold_bandwidth_consumption	%.2f%n", mon2Threshold);
+			out.printf("threshold_time_to_write	%.2f%n", mon3Threshold);
+			out.println();
+			out.printf("action_MST	%d%n", mstCount);
+			out.printf("action_RT	%d%n", rtCount);
+			out.printf("state_changes	%d%n", stateChanges);
+			out.printf("transitions_recorded	%d%n", transitions);
+			out.printf("state_change_rate	%.4f%n", changeRate);
+		} catch (IOException ex) {
+			log.warn("Could not write run summary: {}", ex.getMessage());
+		}
+
+		log.info("Per-NFR satisfaction: MON1={}%, MON2={}%, MON3={}%",
+			String.format("%.1f", 100.0 * mon1Sat / steps),
+			String.format("%.1f", 100.0 * mon2Sat / steps),
+			String.format("%.1f", 100.0 * mon3Sat / steps));
+		log.info("Actions: MST={} RT={}; state changes {}/{} ({}%)", mstCount, rtCount, stateChanges,
+			transitions, String.format("%.1f", 100.0 * changeRate));
+	}
+
+	/**
 	 * Solve a POMDP defined by a .POMDP file
 	 * 
 	 * @param pomdpFileName filename of a domain in the domain directory
 	 */
 	public void run(String pomdpFileName) {
-		if (pomdpFileName.equals("IoT.POMDP")) {
-			// This is where the original DeltaIoT implementation would have gone
-		}
 		if (pomdpFileName.equals("RDM.POMDP")) {
 			runCaseRDM(pomdpFileName); // RDMSim case
 		}

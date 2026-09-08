@@ -57,17 +57,16 @@ public class RDMSimConnector {
 	
 	private double eps;
 	
-	// History of mutual information values per mote for MIP calculation
+	// Running history of mutual information values for MIP calculation. RDMSim has a
+	// single network per timestep, so only key 0 is used (the map shape is a DeltaIoT
+	// leftover, where history was kept per mote).
 	private Map<Integer, ArrayList<Double>> miHistory;
 	private int lookback = 4; // m - lookback period for MIP calculation (SMiLe via setLookback)
 	// Track which timesteps have already had bounds written (to avoid duplicates)
 	private int lastBoundsTimestep = -1;
-	
-	// Track if header has been written to mote_metrics.txt
-	private static boolean moteMetricsHeaderWritten = false;
-	
+		
 	// Surprise measure to use for gamma calculation: "CC" (Confidence-Corrected), "BF" (Bayes Factor), or "MIP" (Mutual Information Surprise)
-	private String surpriseMeasureForGamma = "CC"; // Default to Confidence-Corrected Surprise
+	private String surpriseMeasureForGamma = "MIP"; // overwritten from solver.config; keep in sync with its default
 	
 	// Probability of change (volatility): in (0, 1); controls m = p_c/(1-p_c) in SMiLe gamma formula. SMiLe for experiments.
 	private double p_c = 0.5;
@@ -359,62 +358,50 @@ public class RDMSimConnector {
 		p.transitionBeliefCurr = transitionBeliefCurrTemp;
 	}
 	
-	public int performAction(int selectedaction)
+	/**
+	 * EXECUTE: apply the selected adaptation action to the simulator.
+	 *
+	 * This only changes the topology. RDMSim's NetworkManagment.setNetworkTopology
+	 * does NOT regenerate the monitorables -- new values appear at the next
+	 * getMonitorables() call, i.e. at the next timestep. The consequence of this
+	 * action is therefore observed on the next MAPE-K iteration and fed back via
+	 * observeTransition(). Reading the probe here would return the pre-action
+	 * values and record a self-transition.
+	 */
+	public void performAction(int selectedaction)
 	{
-		
-	////Perform ITP or DTP on the link on the simulator
-			///return rewards and observations
-			//update belief value and change initial belief
-			
-			///Immediate Reward
-			double r=p.getReward(p.getCurrentState(), selectedaction);
-			int nextstate;
-			if(selectedaction==0)
-			{
-				
-				
-				nextstate=p.nextStateRDM(p.getCurrentState(), selectedaction);
-				p.setCurrentState(nextstate);
-				
-			}
-			else {
+		if(selectedaction==0)
+		{
+			effector.setNetworkTopology(RDMSimConnector.timestep, "mst");
+		}
+		else
+		{
+			effector.setNetworkTopology(RDMSimConnector.timestep, "rt");
+		}
+	}
 
-				nextstate=p.nextStateRDM(p.getCurrentState(), selectedaction);
-				p.setCurrentState(nextstate);
-			}
+	/**
+	 * Fold the observed outcome of the previous action into the model.
+	 *
+	 * @param action    the action executed on the previous timestep
+	 * @param nextstate the state observed now, i.e. the result of that action
+	 */
+	public void observeTransition(int action, int nextstate)
+	{
+		/// Update transition beliefs (CC/BF/MIP surprise + SMiLe gamma) based on the new observation
+		this.updateTransitionBelief(action, nextstate);
 
-			/// Update transition beliefs (CC/BF/MIP surprise + SMiLe gamma) based on the new observation
-			this.updateTransitionBelief(selectedaction, nextstate);
+		///Observation
+		int obs = p.getObservation(action, nextstate);
+		this.updateObservationBelief(action, nextstate, obs);
 
-			///Observation
-			int obs=p.getObservation(selectedaction, nextstate);
-			this.updateObservationBelief(selectedaction, nextstate, obs);
-			BeliefPoint b=p.updateBelief(p.getInitialBelief(), selectedaction, obs);
-			p.setInitialBelief(b);
-			
-			//p.getReward(s, action);
-			
-			/*S currentS  = states.stateIdentifier(currentState);
-			
-			S nextState = this.transitions.nextState(currentS, action);
-			
-			this.currentState = states.stateNumber(nextState);
-			
-			
-			double[] reward = this.rewards.getReward(currentS, action, nextState);
-			
-			
-			
-				O obs = this.observationFunction.getObservation(action, nextState);
-				
-				this.beliefUpdate(action, obs);*/
-		
-			
-			
-			return 0;
+		// Renormalise the planning model from the updated Dirichlet counts before
+		// the belief filter uses it.
+		p.refreshLearnedModel();
 
-			
-		
+		BeliefPoint b = p.updateBelief(p.getInitialBelief(), action, obs);
+		p.setInitialBelief(b);
+		p.setCurrentState(nextstate);
 	}
 	
 	
