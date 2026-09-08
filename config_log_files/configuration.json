@@ -1,5 +1,5 @@
 {
-  "time_steps": 1000,
+  "time_steps": 500,
   "mirror_number": 25,
 
   "link_threshold": 35,
@@ -11,7 +11,7 @@
   "mst_active_links": [8, 58],
   "rt_active_links": [50, 83],
 
-  "current_scenario": 0,
+  "current_scenario": 3,
 
   "deviation_scenario_0_mst_links": [0, 0],
   "deviation_scenario_0_mst_bandwidth_consumption": [0, 0],
