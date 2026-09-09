@@ -22,15 +22,21 @@ topologies:
 Three non-functional requirements are monitored, with thresholds set as percentages of network
 capacity in `config_log_files/configuration.json`:
 
-| NFR | Monitorable | Satisfied when | Default |
-|---|---|---|---|
-| MON1 (reliability, MR) | active links | `>=` threshold | 35% of 300 = **105 links** |
-| MON2 (cost, MC) | bandwidth consumption | `<=` threshold | 40% of 300x30 = **3600 Gbps** |
-| MON3 (performance, MP) | time to write | `<=` threshold | 45% of 300x20 = **2700 ms** |
+| Monitorable | NFR | Measures | Satisfied when | Baseline |
+|---|---|---|---|---|
+| MON1 active links | **MR** — Maximisation of Reliability | reliability | `>=` threshold | 35% of 300 = **105 links** |
+| MON2 bandwidth consumption | **MC** — Minimisation of Cost | operational cost | `<=` threshold | 40% of 300x30 = **3600** |
+| MON3 time to write | **MP** — Maximisation of Performance | performance | `<=` threshold | 45% of 300x20 = **2700 ms** |
+
+Note the numbering does **not** follow the MC/MR/MP letter order: MON1 is MR, MON2 is MC, MON3 is
+MP. See **[docs/NFR-MAPPING.md](docs/NFR-MAPPING.md)** for the sourced mapping, the verbatim
+definitions, and the two distinct kinds of baseline threshold in this literature (bounds on the
+measured values versus bounds on satisfaction probability).
 
 `number_of_links = mirror_number*(mirror_number-1)/2 = 300`. The conversion from percentage to
 absolute value is done by RDMSim's `NetworkProperties.loadNetworkSettings()`; nothing in this
-repo overrides it.
+repo overrides it. The 35 / 40 / 45 percentages are the default scenario S0 thresholds from the
+RDMSim exemplar paper, shipped unmodified.
 
 **Satisfaction is reported per NFR, not jointly.** The simulator generates
 `bandwidth = active_links x U{20,30}` and `time_to_write = active_links x U{10,20}`, so MON2 and
@@ -199,3 +205,20 @@ Written to `output_dir/` (git-ignored) and rebuilt on every run.
   `outputDirectory`) are proven but not automated.
 - Stale artefacts at the repo root (`MAPE_KLoop.class`, `M*RegressionResultsSolvePOMDP.txt`) are
   left over from earlier versions and are superseded by the copies in `output_dir/`.
+
+---
+
+## References
+
+- Samin, Garcia Paucar, Bencomo, Carranza Hurtado, Fredericks. *RDMSim: An Exemplar for Evaluation
+  and Comparison of Decision-Making Techniques for Self-Adaptation.* SEAMS 2021.
+  [IEEE](https://ieeexplore.ieee.org/document/9462042/) /
+  [arXiv:2105.01978](https://arxiv.org/abs/2105.01978) — defines the three monitorables, the
+  MC/MR/MP objectives and the default scenario S0 thresholds this repo uses.
+- Garcia Paucar. *Requirements-aware Models to Support Better Informed Decision-making for
+  Self-adaptation using Partially Observable Markov Decision Processes.*
+  PhD thesis, Aston University, December 2019.
+  [Aston Publications](https://publications.aston.ac.uk/id/eprint/41929/) — the POMDP formulation
+  of NFR satisficement and the SLA thresholds on satisfaction probability.
+
+See [docs/NFR-MAPPING.md](docs/NFR-MAPPING.md) for how both map onto this implementation.
