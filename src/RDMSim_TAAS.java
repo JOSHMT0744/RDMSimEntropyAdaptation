@@ -21,9 +21,11 @@ import rdm.management.Probe;
 import rdm.management.RDMSimulator;
 import rdm.network.Monitorables;
 import rdm.simulation.UncertaintyScenario;
+import remotemirroring.CRNStream;
 import remotemirroring.OutputLogger;
 import remotemirroring.RDMSimConnector;
 import remotemirroring.RDMTransitionProb;
+import remotemirroring.ScenarioOverride;
 import remotemirroring.ResultsLog;
 
 import org.apache.logging.log4j.LogManager;
@@ -568,6 +570,23 @@ public class RDMSim_TAAS {
 			RDMSimConnector rdmConnector = new RDMSimConnector();
 			RDMTransitionProb rdmTransProbs = new RDMTransitionProb();
 
+			// Apply -Dscenario / -Dtimesteps now that RDMSim has parsed its own config.
+			// The ablation driver runs many cells concurrently from one working directory, so
+			// it cannot edit the shared config_log_files/configuration.json per cell; these
+			// JVM properties are how a cell selects its scenario and horizon instead.
+			int scenarioInForce = ScenarioOverride.apply(RDMSimConnector.network_management.simulation_properties);
+
+			// RDMSim picked the t=0 topology at load time from the JSON's scenario, with an
+			// unseedable coin flip for scenarios 3/6. Re-pick it from the scenario actually in
+			// force, seeded by runSeed, whenever a cell must be reproducible: under -Dscenario
+			// (the JSON's rule would be the wrong scenario's) or under CRN (an unseeded start
+			// would break the pairing). A plain run keeps the exemplar's own behaviour.
+			String scenarioProperty = System.getProperty("scenario");
+			boolean crnRequested = "true".equalsIgnoreCase(System.getProperty("crn", "false"));
+			if ((scenarioProperty != null && !scenarioProperty.trim().isEmpty()) || crnRequested) {
+				ScenarioOverride.applyInitialTopology(scenarioInForce, runSeed);
+			}
+
 			// config_log_files/configuration.json is the single source of truth for the NFR
 			// thresholds. NetworkProperties.loadNetworkSettings() (called from the
 			// NetworkManagment constructor) converts the configured percentages into absolute
@@ -647,6 +666,23 @@ public class RDMSim_TAAS {
 			// Deviation RNG, seeded so runs are reproducible (Math.random() was not).
 			Random deviationRandom = new Random(runSeed);
 
+			// Common random numbers. RDMSim draws its monitorables with ThreadLocalRandom,
+			// which cannot be seeded from outside the jar, so two ablation arms otherwise
+			// face different environments and any difference between them is confounded with
+			// noise. With -Dcrn=true the environment is pre-drawn for every timestep and BOTH
+			// topologies from a (scenario, seed) stream, and every arm in that cell sees the
+			// same numbers. Off by default so a plain run keeps the exemplar's own behaviour.
+			int horizon = RDMSimConnector.network_management.simulation_properties.getSimulationRuns();
+			CRNStream crnStream = null;
+			if ("true".equalsIgnoreCase(System.getProperty("crn", "false"))) {
+				crnStream = new CRNStream(currentscenario_case, runSeed, horizon,
+						RDMSimConnector.network_management.simulation_properties.getUncertaintyScenario());
+				log.info("Common random numbers ENABLED (scenario={}, seed={}, horizon={})",
+						currentscenario_case, runSeed, horizon);
+			} else {
+				log.info("Common random numbers disabled; monitorables come from RDMSim's ThreadLocalRandom");
+			}
+
 			// The state/action of the previous iteration. RDMSim only reveals the effect of
 			// an action on the NEXT getMonitorables(), so the transition (prevState,
 			// prevAction) -> cs can only be recorded once cs has been monitored.
@@ -671,6 +707,18 @@ public class RDMSim_TAAS {
 				* MONITOR
 				*/
 				RDMSimConnector.monitorables=RDMSimConnector.network_management.getMonitorables();
+
+				// Replace the jar's unseedable draw with this cell's pre-drawn environment, so
+				// that every ablation arm sharing (scenario, seed) monitors identical values
+				// wherever its action path agrees. Must happen before ANALYSE: both the probe's
+				// own fields and the Monitorables object are overwritten, because
+				// POMDP.getInitialStateRDM() reads the former and the logging below reads the
+				// latter.
+				if (crnStream != null) {
+					crnStream.overwrite(RDMSimConnector.timestep,
+							RDMSimConnector.probe.getCurrentTopology().getTopologyName(),
+							RDMSimConnector.monitorables);
+				}
 
 				outputLogger.appendRow("monitorables.txt", RDMSimConnector.timestep,
 						RDMSimConnector.monitorables.getActiveLinks(),
@@ -819,10 +867,17 @@ public class RDMSim_TAAS {
 			pw_mr_regr.close();
 			pw_mp_regr.close();
 
-			try {
-				runPython(outputDir, mon1Threshold, mon2Threshold, mon3Threshold, lookback);
-			} catch (Exception chartEx) {
-				log.warn("Chart generation failed: {}", chartEx.getMessage());
+			// charts.html is ~5 MB per run, so the ablation driver turns it off with
+			// -Dcharts=false: across the full grid it would cost several GB for plots nobody
+			// opens. Cross-cell figures are built from experiments/results.csv instead.
+			if ("false".equalsIgnoreCase(System.getProperty("charts", "true"))) {
+				log.info("Chart generation skipped (-Dcharts=false)");
+			} else {
+				try {
+					runPython(outputDir, mon1Threshold, mon2Threshold, mon3Threshold, lookback);
+				} catch (Exception chartEx) {
+					log.warn("Chart generation failed: {}", chartEx.getMessage());
+				}
 			}
 		} catch (IOException ioex) {
 			log.error("IOException in runCaseIoT", ioex);
