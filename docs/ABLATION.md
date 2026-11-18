@@ -158,6 +158,7 @@ Then the full grid, in batches so it can be interrupted:
 python experiments/run_ablation.py --batch-size 100 --jobs 4 --heap 1g   # repeat
 python experiments/run_ablation.py --list                               # until nothing pending
 python experiments/analyse.py
+python createCharts.py --grid                                           # figures -> figures/
 ```
 
 All commands run from the **project root** — config and domain lookups are relative to the
@@ -426,6 +427,57 @@ flags are negatively correlated: always-MST in S0 has a per-NFR product of 0.464
 it obeys the mixture line too (analytic values in the "All three" column of the ground-truth
 table). It is reported in `analyse.py`'s tables, mixture check and paired tests; the figures
 plot MON1–MON3 only. Older CSVs gain the column with `run_ablation.py --aggregate-only`.
+
+### Figures
+
+```bash
+python createCharts.py --grid                          # everything -> figures/
+python createCharts.py --grid --families lambda,bars   # a subset
+python createCharts.py --grid --html-only              # no kaleido needed
+```
+
+Each figure is written as `.html` (interactive) and `.png` (3×) under `figures/<family>/`,
+with `figures/index.html` as a gallery. [`figures/README.md`](../figures/README.md) explains
+how to read each family and the order to go through them. PNG export uses `kaleido` (in `requirements.txt`),
+which drives a local Chrome; if none is installed, run `plotly_get_chrome` once. The HTML
+camera button downloads an SVG if a vector copy of one figure is needed. Every cross-arm
+figure has seven scenario panels, and every per-NFR figure states the threshold and the
+direction in its title, e.g. "MON1 met when active links ≥ 105 links (35% of 300 links):
+maximise active links".
+
+| Family | Files | What it shows |
+|---|---|---|
+| `lambda_response/` | `rt_share`, `MON1..3` | metric vs λ, one line per learning config |
+| `bars/` | `MON1..3` | mean measured value (links / Gbps / ms) per config, coloured by λ, plus the fixed baselines, with the red threshold line |
+| `mixture/` | `MON1..3` | every arm at (RT share, rate) against the analytic line: the validity figure |
+| `paired/` | `vs_static_*`, `vs_bayes_*`, `pooled_tests.csv` | forest plots of CRN-paired differences at the same λ |
+| `timeseries/lam<λ>/` | `rt_share`, `MON1..3`, `links`, `bw`, `ttw`, `gamma`, `surprise_*` | per-step series over the run, every timestep |
+| `violins/s<N>/` | `lam<λ>` | raw monitorable distributions with the NFR threshold |
+
+**Reading the error bars.**
+
+- Lines, bars and points are **mean ± 1 SD across the 5 seeds**, with the SD always taken
+  within one scenario.
+- Forest plots instead show a **95% t-interval of the CRN-paired difference**. Pairing on
+  (scenario, seed) removes the environment noise both arms shared, so these intervals are
+  far tighter than overlapping SD bars would suggest.
+- Per panel, n = 5, and a two-sided Wilcoxon cannot reach p < 0.05 at n = 5 (its minimum p
+  is 0.0625). The rank test is therefore run on all 35 pairs pooled over scenarios, in
+  `paired/pooled_tests.csv`.
+
+**Smoothing and thresholds.**
+
+- Time series are a trailing mean over the last 25 steps per seed (`--window`), then the
+  band across seeds, on a linear time axis. The first 25 points average fewer than 25
+  steps, so they are noisier than the rest. Each scenario is stationary in distribution, so
+  the curves flatten after a short learning transient.
+- Red lines are the NFR thresholds, derived from `config_log_files/configuration.json`
+  exactly as RDMSim computes them. If a run's `runSummary.txt` recorded different values,
+  the script warns: the config was edited after the grid ran.
+- Dashed and dotted grey lines are the analytic always-MST and always-RT rates.
+
+The per-step logs of all cells are cached in `experiments/analysis/timeseries_cache.pkl`
+after the first read, and refreshed automatically when any cell is re-run.
 
 ---
 
