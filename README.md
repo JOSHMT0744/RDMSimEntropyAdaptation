@@ -73,6 +73,12 @@ src/solver/ERPBVI.java            entropy-regularised PBVI (alternative)
 src/remotemirroring/RDMSimConnector.java    simulator bridge; CC/BF/MIP surprise, SMiLe gamma
 src/remotemirroring/RDMTransitionProb.java  per-NFR success probabilities per scenario
 src/remotemirroring/OutputLogger.java       per-timestep file logging
+src/remotemirroring/CRNStream.java          common random numbers for paired ablation arms
+src/remotemirroring/CRNVerify.java          asserts CRNStream matches the jar's distributions
+src/remotemirroring/ScenarioOverride.java   -Dscenario / -Dtimesteps runtime overrides
+experiments/run_ablation.py       ablation grid driver (selection + resource bounds)
+experiments/analyse.py            cross-cell tables and paired tests from results.csv
+docs/ABLATION.md                  how to run the ablation studies
 src/solver.config                 solver and experiment parameters
 domains/RDM.POMDP                 POMDP model
 config_log_files/configuration.json  RDMSim network, thresholds, uncertainty scenario
@@ -108,9 +114,14 @@ MAPE-K run does not call it and works from the command line without JavaFX on th
 |---|---|
 | `-DconfigPath=<file>` | use a different `solver.config` |
 | `-DoutputDirectory=<dir>` | write output elsewhere (must be **relative** — see Known issues) |
+| `-Dscenario=0..6` | override `current_scenario` without editing `configuration.json` |
+| `-Dtimesteps=N` | override `time_steps` likewise |
+| `-Dcrn=true` | common random numbers; makes runs reproducible and ablation arms paired |
+| `-Dcharts=false` | skip `charts.html` (~5 MB a run) |
 
 Useful for sweeps: copy `src/solver.config`, edit `lambda` and `outputDirectory` in the copy, then
-point the run at it with `-DconfigPath`.
+point the run at it with `-DconfigPath`. For anything larger than a handful of runs, use
+`experiments/run_ablation.py` instead — see [Ablation studies](#ablation-studies).
 
 ---
 
@@ -162,6 +173,50 @@ bandwidth/writing-time by 9-12%, perturbing each topology on a different NFR.
 
 ---
 
+## Ablation studies
+
+The ablation grid is 7 scenarios x 28 arms x 5 seeds = 980 runs, driven by
+`experiments/run_ablation.py`. Every dimension is a filter, so any slice can be run on its
+own and resumed later, and `--jobs`/`--heap` are checked against system RAM before anything
+launches.
+
+```bash
+# check the CRN generator still matches the jar (gates everything else)
+java -cp "bin;libraries/*" remotemirroring.CRNVerify
+
+# see what the full grid would cost, without running it
+python experiments/run_ablation.py --dry-run
+
+# the scenario-3 pilot: all 28 arms, 5 seeds
+python experiments/run_ablation.py --scenarios 3 --seeds 222-226 --jobs 4 --heap 1g
+
+# the full grid, in resumable batches
+python experiments/run_ablation.py --batch-size 100 --jobs 4 --heap 1g
+
+# tables and figures from experiments/results.csv
+python experiments/analyse.py
+```
+
+The 28 arms are `{static, bayes, smile-CC, smile-BF, smile-MIP}` x `lambda in {0,2,5,10,20}`
+plus three fixed-policy baselines (`mst`, `rt`, `random`). Two new `solver.config` keys
+select an arm: `staticModel` freezes the planning model at the seeded Dirichlet prior
+(the bottom rung of the ladder), and `fixedPolicy` bypasses the solver entirely.
+
+**See [docs/ABLATION.md](docs/ABLATION.md)** for the arm rationale, the full CLI reference,
+recipes, the per-scenario ground-truth table used to validate runs, and troubleshooting.
+
+### New JVM overrides
+
+| System property | Effect |
+|---|---|
+| `-Dscenario=0..6` | override `current_scenario` without editing `configuration.json` |
+| `-Dtimesteps=N` | override `time_steps` likewise |
+| `-Dcrn=true` | common random numbers: pre-draw the environment for every timestep and both topologies from a `(scenario, runSeed)` stream, so ablation arms are perfectly paired and runs are reproducible. Default off |
+| `-Dcharts=false` | skip `charts.html` (~5 MB a run) |
+
+`-Dscenario` and `-Dtimesteps` exist so that concurrent cells never write to the shared
+`config_log_files/configuration.json`, which is what makes parallel execution safe.
+
 ## Output
 
 Written to `output_dir/` (git-ignored) and rebuilt on every run.
@@ -186,10 +241,13 @@ Written to `output_dir/` (git-ignored) and rebuilt on every run.
 
 ## Known issues
 
-- **Runs are not bit-reproducible.** `runSeed` deterministically controls the solver, the policy
-  and the deviation draw, but `RDMSim.jar`'s `Monitorables.generateMonitorables` uses
-  `ThreadLocalRandom`, which cannot be seeded externally. The observation stream therefore varies
-  run to run. Average over repeats rather than expecting identical output.
+- **Runs are not bit-reproducible unless `-Dcrn=true`.** `runSeed` deterministically controls
+  the solver, the policy and the deviation draw, but `RDMSim.jar`'s
+  `Monitorables.generateMonitorables` uses `ThreadLocalRandom`, which cannot be seeded
+  externally. `-Dcrn=true` sidesteps this by pre-drawing the environment from a seeded stream
+  (`src/remotemirroring/CRNStream.java`, validated against the jar's own distributions by
+  `remotemirroring.CRNVerify`); without it, average over repeats rather than expecting
+  identical output.
 - **`outputDirectory` must be relative.** `configureDirectories()` resolves it against the working
   directory and rejects an absolute path with "Output directory could not be created".
 - **`domains/rdm.POMDP` is tracked with a lowercase name** while the code requests `RDM.POMDP`.
@@ -201,8 +259,13 @@ Written to `output_dir/` (git-ignored) and rebuilt on every run.
   unchanged; they bias the policy toward MST.
 - **`MIPBounds.txt` is not a usable test.** The bounds depend only on `n`, `m` and `rho`, never on
   the data.
-- There is no ablation driver script yet; the per-cell mechanics (`-DconfigPath` plus a relative
-  `outputDirectory`) are proven but not automated.
+- **RT satisfies MON1 with probability 1.000 in every scenario** (150 links less 12% is still
+  above the 105 threshold), so MON1 carries no decision information under the published
+  thresholds. The optimal action also never flips across S0-S6: MST wins MON2, MON3 and joint
+  satisfaction everywhere. See the ground-truth table in [docs/ABLATION.md](docs/ABLATION.md).
+- **Solver time is superlinear in the horizon**, because the POMDP is re-solved from scratch
+  every timestep and the alpha-vector set grows as the learned model moves. Do not extrapolate
+  grid cost linearly from a short pilot.
 - Stale artefacts at the repo root (`MAPE_KLoop.class`, `M*RegressionResultsSolvePOMDP.txt`) are
   left over from earlier versions and are superseded by the copies in `output_dir/`.
 

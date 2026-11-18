@@ -65,3 +65,10 @@ logs/
 *.temp
 *~
 .cache/
+
+# Ablation grid outputs (per-cell logs are ~1-2 MB each; the full grid is GBs)
+experiments/cells/
+experiments/manifest.json
+experiments/results.csv
+experiments/analysis/
+experiments/_smoke/
