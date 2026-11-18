@@ -73,6 +73,8 @@ public class RDMSimConnector {
 	
 	// If true, use SMiLe (surprise-weighted) transition belief updates; if false, use classic Bayesian (Dirichlet +1 only).
 	private boolean useSurpriseUpdating = true;
+	/** When true the Dirichlet model is never updated; see setStaticModel. */
+	private boolean staticModel = false;
 	
 	// Output directory for file operations
 	private String outputDirectory = "output_dir/"; // Default, will be set by SolvePOMDP
@@ -111,6 +113,22 @@ public class RDMSimConnector {
 	}
 	
 	/** Set whether to use surprise-based (SMiLe) or classic Bayesian transition belief updates. */
+	/**
+	 * Freeze the planning model at the seeded Dirichlet prior for the whole run.
+	 *
+	 * <p>This is the bottom rung of the ablation ladder: it isolates "does the learning loop
+	 * do any work at all", which neither {@code useSurpriseUpdating=false} (still learns,
+	 * just without surprise weighting) nor any lambda setting can answer. The belief filter
+	 * still advances - only the model is frozen.
+	 */
+	public void setStaticModel(boolean staticModel) {
+		this.staticModel = staticModel;
+	}
+
+	public boolean isStaticModel() {
+		return staticModel;
+	}
+
 	public void setUseSurpriseUpdating(boolean useSurpriseUpdating) {
 		this.useSurpriseUpdating = useSurpriseUpdating;
 	}
@@ -388,16 +406,22 @@ public class RDMSimConnector {
 	 */
 	public void observeTransition(int action, int nextstate)
 	{
-		/// Update transition beliefs (CC/BF/MIP surprise + SMiLe gamma) based on the new observation
-		this.updateTransitionBelief(action, nextstate);
-
 		///Observation
 		int obs = p.getObservation(action, nextstate);
-		this.updateObservationBelief(action, nextstate, obs);
 
-		// Renormalise the planning model from the updated Dirichlet counts before
-		// the belief filter uses it.
-		p.refreshLearnedModel();
+		// The staticModel arm freezes the MODEL, not the belief. Skipping the Dirichlet
+		// updates leaves the planner working from the seeded prior for the whole run, which
+		// is the point of the arm; the belief filter below must still run, or the arm would
+		// be "planning from a frozen belief" and would not isolate the learning loop.
+		if (!staticModel) {
+			/// Update transition beliefs (CC/BF/MIP surprise + SMiLe gamma) based on the new observation
+			this.updateTransitionBelief(action, nextstate);
+			this.updateObservationBelief(action, nextstate, obs);
+
+			// Renormalise the planning model from the updated Dirichlet counts before
+			// the belief filter uses it.
+			p.refreshLearnedModel();
+		}
 
 		BeliefPoint b = p.updateBelief(p.getInitialBelief(), action, obs);
 		p.setInitialBelief(b);

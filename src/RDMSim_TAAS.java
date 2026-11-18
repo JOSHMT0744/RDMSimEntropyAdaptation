@@ -66,6 +66,21 @@ public class RDMSim_TAAS {
 	private int lookback = 4;   // keep in sync with solver.config and RDMSimConnector
 
 	/**
+	 * Ablation arm selectors (from solver.config).
+	 *
+	 * staticModel freezes the planning model at the seeded Dirichlet prior - the bottom rung
+	 * of the ablation ladder, isolating whether the learning loop does any work at all.
+	 *
+	 * fixedPolicy ("", "mst", "rt", "random") bypasses the solver entirely and plays a
+	 * constant or coin-flip policy. These are the baseline arms: because RDMSim is memoryless
+	 * given the action, every policy's satisfaction rate is a convex combination of the two
+	 * per-action rates, so the fixed arms pin the endpoints that every algorithm arm must be
+	 * read against.
+	 */
+	private boolean staticModel = false;
+	private String fixedPolicy = "";
+
+	/**
 	 * NFR satisfaction thresholds, in absolute units. These are NOT read from
 	 * solver.config: they are derived by RDMSim from the percentages in
 	 * config_log_files/configuration.json and read back in runCaseRDM().
@@ -369,6 +384,25 @@ public class RDMSim_TAAS {
 			throw new RuntimeException("lookback must be > 0; got " + this.lookback);
 		}
 
+		// Ablation arm selectors.
+		String staticModelStr = getProperty(properties, "staticModel", "false");
+		if (!staticModelStr.equals("true") && !staticModelStr.equals("false")) {
+			throw new RuntimeException("staticModel must be true or false; got '" + staticModelStr + "'");
+		}
+		this.staticModel = staticModelStr.equals("true");
+
+		this.fixedPolicy = getProperty(properties, "fixedPolicy", "").trim().toLowerCase();
+		if (!this.fixedPolicy.isEmpty() && !this.fixedPolicy.matches("mst|rt|random")) {
+			throw new RuntimeException(
+					"fixedPolicy must be empty, mst, rt or random; got '" + this.fixedPolicy + "'");
+		}
+		if (!this.fixedPolicy.isEmpty() && this.staticModel) {
+			// Not an error, but it is almost certainly a mistake in a generated config: a
+			// fixed policy never consults the model, so the staticModel flag does nothing.
+			log.warn("fixedPolicy={} with staticModel=true: staticModel has no effect on a"
+					+ " policy that never consults the model", this.fixedPolicy);
+		}
+
 		// Strength of the informative Dirichlet prior seeded from the .POMDP transition
 		// function. 1.0 keeps the same total pseudo-count mass as a flat alpha=1 prior.
 		PomdpParser.priorStrength = Double.parseDouble(getProperty(properties, "priorStrength", "1.0"));
@@ -438,6 +472,8 @@ public class RDMSim_TAAS {
 		log.info(
 				"Experiment: runSeed={}, surpriseMeasure={}, p_c={}, useSurpriseUpdating={}, lookback={}",
 				runSeed, surpriseMeasureForGamma, p_c, useSurpriseUpdating, lookback);
+		log.info("Ablation arm: staticModel={}, fixedPolicy={}", staticModel,
+				fixedPolicy.isEmpty() ? "(none)" : fixedPolicy);
 
 		// load required POMDP algorithm (use runSeed for reproducible experiments)
 		switch (algorithmType) {
@@ -619,6 +655,7 @@ public class RDMSim_TAAS {
 			rdmConnector.setP_c(p_c);
 			rdmConnector.setLookback(lookback);
 			rdmConnector.setUseSurpriseUpdating(useSurpriseUpdating);
+			rdmConnector.setStaticModel(staticModel);
 
 			// Set up monitorable logging: truncate any stale files from a previous run
 			OutputLogger outputLogger = new OutputLogger(outputDir);
@@ -805,31 +842,49 @@ public class RDMSim_TAAS {
 				* PLAN
 				* Solve the POMDP to determine the optimal adaptation action for the belief
 				*/
-				ArrayList<AlphaVector> V1=solver.solve(rdmPOMDP);
-				System.out.println("Value size: "+V1.size());
-
-				// select action using the relevant selected action-selection policy
 				int selectedAction;
-				if (solver instanceof ERPBVI) {
-					erPolicy = new ERPolicy(rdmPOMDP, (ERPBVI)solver, policyRandom);
-					selectedAction = erPolicy.selectAction(initialbelief);
-				} else if (solver instanceof ERPerseus) {
-					double lambda = ((ERPerseus) solver).getLambda();
-					erPolicy = new ERPolicy(rdmPOMDP, V1, lambda, policyRandom);
-					selectedAction = erPolicy.selectAction(initialbelief);
+				if (!fixedPolicy.isEmpty()) {
+					// Baseline arm: no solve, no belief-based selection. These pin the endpoints
+					// of the MST-RT mixture line that every algorithm arm is read against, and
+					// they cost no solver time. Everything else in the loop (monitoring, state
+					// classification, learning, logging) runs unchanged, so the rows are
+					// directly comparable with the algorithm arms.
+					selectedAction = switch (fixedPolicy) {
+						case "mst" -> 0;
+						case "rt" -> 1;
+						case "random" -> policyRandom.nextInt(2);
+						default -> throw new RuntimeException("Unhandled fixedPolicy: " + fixedPolicy);
+					};
+					// No Q-values exist without a value function; leave qvalues.txt empty rather
+					// than writing zeros that would pollute the mean |Q-gap| column.
+					log.debug("Fixed policy {} selected action {}", fixedPolicy, selectedAction);
+					outputLogger.appendRow("SelectedAction.txt", RDMSimConnector.timestep, selectedAction);
 				} else {
-					int bestIndex = AlphaVector.getBestVectorIndex(initialbelief.getBelief(), V1);
-					selectedAction = V1.get(bestIndex).getAction();
-				}
-				// Log per-action Q-values: their spread is the scale lambda must be set against.
-				if (erPolicy != null) {
-					double[] qv = erPolicy.getQValues(initialbelief.getBelief());
-					if (qv.length >= 2) {
-						outputLogger.appendRow("qvalues.txt", RDMSimConnector.timestep, qv[0], qv[1], Math.abs(qv[0] - qv[1]));
+					ArrayList<AlphaVector> V1=solver.solve(rdmPOMDP);
+					System.out.println("Value size: "+V1.size());
+
+					// select action using the relevant selected action-selection policy
+					if (solver instanceof ERPBVI) {
+						erPolicy = new ERPolicy(rdmPOMDP, (ERPBVI)solver, policyRandom);
+						selectedAction = erPolicy.selectAction(initialbelief);
+					} else if (solver instanceof ERPerseus) {
+						double lambda = ((ERPerseus) solver).getLambda();
+						erPolicy = new ERPolicy(rdmPOMDP, V1, lambda, policyRandom);
+						selectedAction = erPolicy.selectAction(initialbelief);
+					} else {
+						int bestIndex = AlphaVector.getBestVectorIndex(initialbelief.getBelief(), V1);
+						selectedAction = V1.get(bestIndex).getAction();
 					}
+					// Log per-action Q-values: their spread is the scale lambda must be set against.
+					if (erPolicy != null) {
+						double[] qv = erPolicy.getQValues(initialbelief.getBelief());
+						if (qv.length >= 2) {
+							outputLogger.appendRow("qvalues.txt", RDMSimConnector.timestep, qv[0], qv[1], Math.abs(qv[0] - qv[1]));
+						}
+					}
+					log.debug("Selected action: {}", selectedAction);
+					outputLogger.appendRow("SelectedAction.txt", RDMSimConnector.timestep, selectedAction);
 				}
-				log.debug("Selected action: {}", selectedAction);
-				outputLogger.appendRow("SelectedAction.txt", RDMSimConnector.timestep, selectedAction);
 
 				/*
 				* EXECUTE
@@ -915,6 +970,11 @@ public class RDMSim_TAAS {
 			out.printf("lookback	%d%n", lookback);
 			out.printf("useSurpriseUpdating	%b%n", useSurpriseUpdating);
 			out.printf("priorStrength	%.4f%n", PomdpParser.priorStrength);
+			// Ablation bookkeeping: the driver parses these back out to label each CSV row, so
+			// a cell's directory name is never the only record of what it ran.
+			out.printf("staticModel	%b%n", staticModel);
+			out.printf("fixedPolicy	%s%n", fixedPolicy.isEmpty() ? "none" : fixedPolicy);
+			out.printf("crn	%b%n", "true".equalsIgnoreCase(System.getProperty("crn", "false")));
 			out.println();
 			out.printf("MON1_satisfaction_rate	%.4f%n", ((double) mon1Sat) / steps);
 			out.printf("MON2_satisfaction_rate	%.4f%n", ((double) mon2Sat) / steps);
@@ -932,6 +992,11 @@ public class RDMSim_TAAS {
 			out.println();
 			out.printf("action_MST	%d%n", mstCount);
 			out.printf("action_RT	%d%n", rtCount);
+			// RT share is the one number that summarises a policy on this exemplar: because
+			// RDMSim is memoryless given the action, every arm's satisfaction rates are a
+			// convex combination of the two per-action rates, weighted by exactly this.
+			int actionTotal = mstCount + rtCount;
+			out.printf("action_RT_share	%.4f%n", actionTotal > 0 ? ((double) rtCount) / actionTotal : 0.0);
 			out.printf("state_changes	%d%n", stateChanges);
 			out.printf("transitions_recorded	%d%n", transitions);
 			out.printf("state_change_rate	%.4f%n", changeRate);
