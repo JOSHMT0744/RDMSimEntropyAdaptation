@@ -47,7 +47,12 @@ TRUTH = {
     6: {"mst": (0.373, 0.824, 0.936, 0.177), "rt": (1.000, 0.079, 0.414, 0.055)},
 }
 
-METRICS = ["MON1_rate", "MON2_rate", "MON3_rate", "rt_share"]
+METRICS = ["MON1_rate", "MON2_rate", "MON3_rate", "joint_rate", "rt_share"]
+
+# Satisfaction metrics and their column in TRUTH's (MON1, MON2, MON3, joint) tuples. The
+# joint rate (all three NFRs met at the same timestep) is a convex combination in RT share
+# too, because the environment is memoryless given the action.
+RATE_TRUTH_INDEX = {"MON1_rate": 0, "MON2_rate": 1, "MON3_rate": 2, "joint_rate": 3}
 LEARNING_ORDER = ["static", "bayes", "smile-CC", "smile-BF", "smile-MIP"]
 
 
@@ -170,7 +175,7 @@ def per_scenario_tables(rows: list[dict]) -> dict[int, str]:
     for scenario in sorted(by_scenario):
         lines = [f"Scenario {scenario} - mean (sd) over seeds", ""]
         lines.append(f"{'arm':22s} {'n':>2s} {'MON1':>15s} {'MON2':>15s} {'MON3':>15s} "
-                     f"{'RT share':>15s} {'|Qgap|':>8s} {'gamma':>8s}")
+                     f"{'all three':>15s} {'RT share':>15s} {'|Qgap|':>8s} {'gamma':>8s}")
         groups: dict[str, list[dict]] = defaultdict(list)
         for row in by_scenario[scenario]:
             groups[row["arm"]].append(row)
@@ -217,7 +222,8 @@ def mixture_line_report(rows: list[dict]) -> str:
         "much beyond sampling error (about 0.015 at 1000 steps) indicates a bug.",
         "",
         f"{'scen':>4s} {'arm':22s} {'RT share':>8s} "
-        f"{'MON1 obs/pred':>16s} {'MON2 obs/pred':>16s} {'MON3 obs/pred':>16s} {'worst':>7s}",
+        f"{'MON1 obs/pred':>16s} {'MON2 obs/pred':>16s} {'MON3 obs/pred':>16s} "
+        f"{'all3 obs/pred':>16s} {'worst':>7s}",
     ]
 
     groups: dict[tuple[int, str], list[dict]] = defaultdict(list)
@@ -236,7 +242,7 @@ def mixture_line_report(rows: list[dict]) -> str:
             continue
         parts = [f"{scenario:>4d}", f"{arm:22s}", cell(share, 8)]
         worst = 0.0
-        for index, metric in enumerate(METRICS[:3]):
+        for metric, index in RATE_TRUTH_INDEX.items():
             observed, _, _ = mean_sd([r[metric] for r in group])
             predicted = share * truth["rt"][index] + (1 - share) * truth["mst"][index]
             if observed is None:

@@ -893,7 +893,7 @@ def manifest_entry(cell: Cell) -> dict:
 
 CSV_COLUMNS = [
     "scenario", "learning", "lambda", "baseline", "seed", "timesteps", "crn",
-    "MON1_rate", "MON2_rate", "MON3_rate",
+    "MON1_rate", "MON2_rate", "MON3_rate", "joint_rate",
     "MON1_belief", "MON2_belief", "MON3_belief",
     "rt_share", "mean_links", "mean_bw", "mean_ttw",
     "mean_abs_qgap", "mean_gamma", "state_change_rate",
@@ -937,6 +937,43 @@ def mean_of_column(path: Path, column: int) -> float | None:
     except OSError:
         return None
     return total / count if count else None
+
+
+def read_flags(path: Path) -> dict[int, int] | None:
+    """timestep -> satisfied flag from a MON{1,2,3}Sat.txt ("timestep value flag")."""
+    if not path.exists():
+        return None
+    flags: dict[int, int] = {}
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.split()
+            if len(parts) < 3:
+                continue
+            try:
+                flags[int(float(parts[0]))] = int(float(parts[2]))
+            except ValueError:
+                continue
+    except OSError:
+        return None
+    return flags or None
+
+
+def joint_rate(directory: Path) -> float | None:
+    """Fraction of timesteps at which MON1, MON2 and MON3 are all satisfied at once.
+
+    Not the product of the per-NFR rates: within a step the three are negatively
+    correlated (more active links helps MON1 and hurts MON2/MON3), so the joint rate sits
+    well below the product. Computed from the per-step flags, joined on timestep; None
+    when any of the three logs is missing (e.g. pruned with --keep-logs summary).
+    """
+    per_nfr = [read_flags(directory / f"MON{i}Sat.txt") for i in (1, 2, 3)]
+    if any(flags is None for flags in per_nfr):
+        return None
+    common = set(per_nfr[0]) & set(per_nfr[1]) & set(per_nfr[2])
+    if not common:
+        return None
+    hits = sum(1 for t in common if all(flags[t] == 1 for flags in per_nfr))
+    return hits / len(common)
 
 
 def cell_from_manifest(key: str, entry: dict) -> Cell | None:
@@ -989,6 +1026,7 @@ def aggregate(cells: list[Cell], args: argparse.Namespace,
             "MON1_rate": summary.get("MON1_satisfaction_rate", ""),
             "MON2_rate": summary.get("MON2_satisfaction_rate", ""),
             "MON3_rate": summary.get("MON3_satisfaction_rate", ""),
+            "joint_rate": fmt(joint_rate(directory)),
             "MON1_belief": summary.get("MON1_mean_belief_prob", ""),
             "MON2_belief": summary.get("MON2_mean_belief_prob", ""),
             "MON3_belief": summary.get("MON3_mean_belief_prob", ""),

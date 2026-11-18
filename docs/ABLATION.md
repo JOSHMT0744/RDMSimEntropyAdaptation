@@ -409,6 +409,7 @@ failed cell keeps everything needed to diagnose it.
 | `timesteps` | horizon actually run |
 | `crn` | whether common random numbers were used |
 | `MON1_rate`, `MON2_rate`, `MON3_rate` | per-NFR satisfaction rate over the whole run |
+| `joint_rate` | fraction of timesteps at which all three NFRs were satisfied **at the same step**, from the per-step flags in `MON{1,2,3}Sat.txt`; empty if those logs were pruned |
 | `MON1_belief`, `MON2_belief`, `MON3_belief` | mean belief marginal for that NFR |
 | `rt_share` | fraction of timesteps the RT topology was chosen |
 | `mean_links`, `mean_bw`, `mean_ttw` | mean monitorables (links, Gbps, ms) |
@@ -418,9 +419,13 @@ failed cell keeps everything needed to diagnose it.
 | `wallclock_s`, `peak_rss_mb` | cost of the run; RSS needs `psutil` |
 | `status` | `done` for aggregated rows |
 
-Satisfaction is reported **per NFR, never jointly**: MON2 and MON3 are both monotone
-increasing in active links while MON1 wants links high, so the three are not jointly
-satisfiable in general on this exemplar.
+**Joint satisfaction is not the product of the per-NFR rates.** MON2 and MON3 are both
+monotone increasing in active links while MON1 wants links high, so within a step the three
+flags are negatively correlated: always-MST in S0 has a per-NFR product of 0.464 × 0.811 ×
+0.929 ≈ 0.35 but a joint rate of only 0.254. `joint_rate` is the measured co-occurrence, and
+it obeys the mixture line too (analytic values in the "All three" column of the ground-truth
+table). It is reported in `analyse.py`'s tables, mixture check and paired tests; the figures
+plot MON1–MON3 only. Older CSVs gain the column with `run_ablation.py --aggregate-only`.
 
 ---
 
